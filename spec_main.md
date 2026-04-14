@@ -247,10 +247,39 @@ adding_doubling:
   - 写像性（DOI / Clarity）: 中心の直進光と周辺の小角散乱光のエネルギー比、または光学くしを通したMTFコントラスト。
   - ギラツキ（Sparkle / GD値）: ピクセルレベル積分評価（下記参照）により算出。
 - **表面形状指標（高さ配列 $h(x,y)$ から算出）**
-  - RMS粗さ（$Rq$ / $Sq$）: 高さの二乗平均平方根。
-  - 算術平均粗さ（$Ra$ / $Sa$）: 高さの絶対値の平均。
-  - 最大断面高さ（$Rz$ / $Sz$）: Peak-to-Valley（PV値）。
-  - RMS傾斜角（$Sdq$）: 局所的な傾き（スロープ）の二乗平均平方根。
+
+  準拠規格: **ISO 25178-2**（面パラメータ）、**JIS B 0601 / ISO 4287**（プロファイルパラメータ）。
+  プロファイルパラメータは行・列両方向のプロファイルを平均して算出する。
+
+  **ISO 25178-2 S-パラメータ（面粗さ）**
+
+  | 記号 | 名称 | 定義 |
+  |---|---|---|
+  | $Sq$ | 二乗平均平方根高さ | $\sqrt{\frac{1}{A}\iint z^2\,dA}$ |
+  | $Sa$ | 算術平均高さ | $\frac{1}{A}\iint |z|\,dA$ |
+  | $Sp$ | 最大山高さ | $\max(z)$ |
+  | $Sv$ | 最大谷深さ | $|\min(z)|$ |
+  | $Sz$ | 最大高さ | $Sp + Sv$ |
+  | $Ssk$ | スキューネス | $\frac{1}{Sq^3}\cdot\frac{1}{A}\iint z^3\,dA$ |
+  | $Sku$ | クルトシス | $\frac{1}{Sq^4}\cdot\frac{1}{A}\iint z^4\,dA$ |
+  | $Sdq$ | 二乗平均平方根傾斜 | $\sqrt{\text{mean}\!\left[(\partial z/\partial x)^2+(\partial z/\partial y)^2\right]}$ |
+  | $Sdr$ | 界面展開面積比 | $(\text{実面積}-\text{投影面積})/\text{投影面積}\times 100\%$ |
+  | $Sal$ | 自己相関長 | NACFが全方向でしきい値(0.2)を下回る最小ラグ距離 |
+  | $Str$ | テクスチャアスペクト比 | $Sal_{\min} / Sal_{\max}$（0→異方性、1→等方性） |
+
+  **JIS B 0601 / ISO 4287 R-パラメータ（プロファイル粗さ）**
+
+  | 記号 | 名称 | 内容 |
+  |---|---|---|
+  | $Rq$ | 二乗平均平方根粗さ | プロファイルのRMS値（行・列平均） |
+  | $Ra$ | 算術平均粗さ | プロファイルの絶対値平均 |
+  | $Rz$ | 最大高さ | プロファイルのPV値平均 |
+  | $Rp$ | 最大山高さ | $\max(z)$ のプロファイル平均 |
+  | $Rv$ | 最大谷深さ | $|\min(z)|$ のプロファイル平均 |
+  | $Rsk$ | スキューネス | $\text{mean}(z^3)/Rq^3$ のプロファイル平均 |
+  | $Rku$ | クルトシス | $\text{mean}(z^4)/Rq^4$ のプロファイル平均 |
+  | $Rsm$ | 輪郭曲線要素の平均幅 | 評価長 / プロファイル要素数 |
+  | $Rc$ | 輪郭曲線要素の平均高さ | 山と隣接谷の高さ差の平均 |
 
 ### 5.2. 評価アルゴリズム詳細：ギラツキ（Sparkle）
 
@@ -478,15 +507,58 @@ panel==1.4.2
 | `test_polarization_p` | P偏光 BSDF が非負 |
 | `test_btdf_mode` | BTDF モードで max > 0 |
 
-#### 9.2.4. 光学指標（`tests/test_metrics.py`）
+#### 9.2.4. 表面形状・光学指標（`tests/test_metrics.py`）
+
+**TestSurfaceMetrics（既存パラメータ）**
 
 | テスト名 | 検証内容 |
 |---|---|
 | `test_rq_flat` | 平坦面の Rq = 0 |
-| `test_rq_sine` | 正弦波の Rq = amplitude/√2（相対誤差 5%） |
+| `test_rq_sine` | 正弦波の Rq（行列両方向平均） |
+| `test_ra_positive` | Ra ≥ 0 |
+| `test_rz_flat` | 平坦面の Rz = 0 |
+| `test_rz_positive` | 正弦波の Rz > 0 |
 | `test_sdq_flat` | 平坦面の Sdq = 0 |
 | `test_sdq_sine` | 正弦波の Sdq > 0 |
-| `test_all_metrics_keys` | compute_all_surface_metrics のキー集合 |
+| `test_all_metrics_keys` | compute_all_surface_metrics の全キー集合 |
+
+**TestISO25178Metrics（ISO 25178-2 S-パラメータ）**
+
+| テスト名 | 検証内容 |
+|---|---|
+| `test_sq_flat` | 平坦面の Sq = 0 |
+| `test_sq_sine` | 正弦波の Sq = amplitude/√2（相対誤差 5%） |
+| `test_sa_flat` | 平坦面の Sa = 0 |
+| `test_sa_positive` | 正弦波の Sa > 0 |
+| `test_sp_positive` | 正弦波の Sp > 0 |
+| `test_sv_positive` | 正弦波の Sv > 0 |
+| `test_sz_equals_sp_plus_sv` | Sz = Sp + Sv が成立する |
+| `test_ssk_sine_near_zero` | 正弦波（対称分布）の Ssk ≈ 0 |
+| `test_ssk_flat` | 平坦面の Ssk = 0 |
+| `test_sku_sine` | 正弦波の Sku = 1.5（理論値） |
+| `test_sdr_flat` | 平坦面の Sdr = 0% |
+| `test_sdr_positive` | 起伏面の Sdr > 0% |
+| `test_sal_positive` | Sal > 0 |
+| `test_str_range` | Str ∈ [0, 1] |
+
+**TestJISB0601Metrics（JIS B 0601 R-パラメータ）**
+
+| テスト名 | 検証内容 |
+|---|---|
+| `test_rp_positive` | 正弦波の Rp > 0 |
+| `test_rv_positive` | 正弦波の Rv > 0 |
+| `test_rp_rv_relation` | Rp + Rv ≤ Rz（プロファイル平均の性質） |
+| `test_rsk_sine_near_zero` | 正弦波（対称分布）の Rsk ≈ 0 |
+| `test_rku_sine` | 正弦波の Rku ≈ 1.5（理論値） |
+| `test_rsm_positive` | 正弦波の Rsm > 0 |
+| `test_rsm_flat` | 平坦面の Rsm = 物理サイズ（要素なし） |
+| `test_rc_positive` | 正弦波の Rc > 0 |
+| `test_rc_flat` | 平坦面の Rc = 0 |
+
+**TestLogRMSE・TestOpticalMetrics**
+
+| テスト名 | 検証内容 |
+|---|---|
 | `test_perfect_match` | Log-RMSE = 0（完全一致） |
 | `test_floor_masking` | フロア以下の点が誤差計算から除外される |
 | `test_order_of_magnitude_error` | 10倍差 → Log-RMSE = 1.0 |
