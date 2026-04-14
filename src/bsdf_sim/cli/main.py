@@ -74,6 +74,11 @@ def simulate(
     all_dfs = []
     approx_mode = cfg._resolved.get("psd", {}).get("approx_mode", False)
 
+    # 光学指標計算に使う u, v, bsdf を明示的に追跡（method によらず正しい変数を使う）
+    u_primary: np.ndarray | None = None
+    v_primary: np.ndarray | None = None
+    bsdf_primary: np.ndarray | None = None
+
     # FFT 計算
     if method in ("fft", "both"):
         logger.info("FFT 法で計算中...")
@@ -87,6 +92,7 @@ def simulate(
             polarization=cfg.polarization,
             is_btdf=cfg.is_btdf,
         )
+        u_primary, v_primary, bsdf_primary = u, v, bsdf_fft
         df_fft = build_dataframe(
             u, v, bsdf_fft, "FFT",
             cfg.theta_i_deg, cfg.phi_i_deg, cfg.wavelength_um, cfg.polarization,
@@ -109,6 +115,8 @@ def simulate(
             is_btdf=cfg.is_btdf,
             approx_mode=approx_mode,
         )
+        if u_primary is None:  # FFT なし（method='psd'）の場合は PSD を primary に
+            u_primary, v_primary, bsdf_primary = u, v, bsdf_psd
         df_psd = build_dataframe(
             u, v, bsdf_psd, "PSD",
             cfg.theta_i_deg, cfg.phi_i_deg, cfg.wavelength_um, cfg.polarization,
@@ -117,19 +125,44 @@ def simulate(
         all_dfs.append(df_psd)
         logger.info("PSD 計算完了。")
 
-    # 光学指標の計算（FFT 結果を使用）
-    if all_dfs:
+    # Adding-Doubling 多層合成（config で enabled: true の場合のみ）
+    if cfg.adding_doubling.get("enabled", False) and bsdf_primary is not None:
+        logger.info("Adding-Doubling 多層合成を実行中...")
+        from ..optics.multilayer import MultiLayerBSDF
+        ad_cfg = cfg.adding_doubling
+        ml_bsdf = MultiLayerBSDF(
+            precision=ad_cfg.get("precision", "standard"),
+            n_theta=ad_cfg.get("n_theta"),
+            m_phi=ad_cfg.get("m_phi"),
+        )
+        for layer in ad_cfg.get("layers", []):
+            layer_type = layer.get("type")
+            if layer_type == "surface":
+                ml_bsdf.add_surface_layer(bsdf_primary, u_primary, v_primary)
+            elif layer_type == "bulk":
+                ml_bsdf.add_bulk_layer(
+                    g=float(layer.get("hg_g", 0.8)),
+                    scattering_coeff_um=float(layer.get("scattering_coeff", 0.1)),
+                    thickness_um=float(layer.get("thickness_um", 100.0)),
+                )
+        u_ml, v_ml, bsdf_ml = ml_bsdf.to_bsdf_2d(u_primary, v_primary)
+        df_ml = build_dataframe(
+            u_ml, v_ml, bsdf_ml, "MultiLayer",
+            cfg.theta_i_deg, cfg.phi_i_deg, cfg.wavelength_um, cfg.polarization,
+            is_btdf=cfg.is_btdf,
+        )
+        all_dfs.append(df_ml)
+        u_primary, v_primary, bsdf_primary = u_ml, v_ml, bsdf_ml
+        logger.info("Adding-Doubling 完了。")
+
+    if all_dfs and bsdf_primary is not None:
         import pandas as pd
         df_combined = pd.concat(all_dfs, ignore_index=True)
 
-        if method in ("fft", "both"):
-            u_fft_grid, v_fft_grid = np.meshgrid(
-                np.unique(df_fft["u"]), np.unique(df_fft["v"]), indexing="ij"
-            )
-
         optical_metrics = compute_all_optical_metrics(
-            u_grid=u, v_grid=v,
-            bsdf=bsdf_fft if method in ("fft", "both") else bsdf_psd,
+            u_grid=u_primary,
+            v_grid=v_primary,
+            bsdf=bsdf_primary,
             config=cfg.metrics,
             bsdf_floor=cfg.bsdf_floor,
         )

@@ -249,6 +249,52 @@ class MultiLayerBSDF:
 
         return self._theta_quad, S_total
 
+    def to_bsdf_2d(
+        self,
+        u_ref: np.ndarray,
+        v_ref: np.ndarray,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """合成散乱行列を参照グリッド(u, v)上の2次元BSDFに変換する。
+
+        法線入射（theta_i=0）の散乱分布を参照グリッドに補間して展開する。
+
+        Args:
+            u_ref: 方向余弦 u のグリッド（shape: N×N）
+            v_ref: 方向余弦 v のグリッド（shape: N×N）
+
+        Returns:
+            u_ref, v_ref, bsdf_2d: 参照グリッドとBSDF値 [sr⁻¹]
+        """
+        from scipy.interpolate import interp1d
+
+        theta_quad, S_total = self.compute()
+
+        # 法線入射（theta_i ≈ 0）の行を使用
+        normal_idx = np.argmin(np.abs(theta_quad))
+        bsdf_1d = S_total[normal_idx, :]
+        theta_deg_arr = np.rad2deg(theta_quad)
+
+        # 参照グリッドの各点で散乱角を計算（半球内のみ有効）
+        uv_r2 = u_ref**2 + v_ref**2
+        valid = uv_r2 <= 1.0
+        theta_s_map = np.where(
+            valid,
+            np.rad2deg(np.arcsin(np.sqrt(np.minimum(uv_r2, 1.0)))),
+            0.0,
+        )
+
+        # 1D BSDF を散乱角で補間して2Dに展開
+        f_interp = interp1d(
+            theta_deg_arr,
+            bsdf_1d,
+            kind="linear",
+            bounds_error=False,
+            fill_value=0.0,
+        )
+        bsdf_2d = np.where(valid, f_interp(theta_s_map), 0.0)
+
+        return u_ref, v_ref, bsdf_2d.astype(np.float32)
+
     def to_bsdf_1d(self) -> tuple[np.ndarray, np.ndarray]:
         """合成散乱行列から法線入射時の1次元BSDFプロファイルを取得する。
 

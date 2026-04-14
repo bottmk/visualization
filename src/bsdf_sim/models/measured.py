@@ -133,6 +133,51 @@ class MeasuredSurface(BaseSurfaceModel):
         )
 
     @classmethod
+    def from_config(cls, config: dict) -> "MeasuredSurface":
+        """config.yaml の設定辞書から MeasuredSurface を生成する。
+
+        設定例::
+
+            surface:
+              model: 'MeasuredSurface'
+              grid_size: 4096
+              pixel_size_um: 0.25
+              measured:
+                path: 'data/surface.csv'
+                source_pixel_size_um: 1.0
+                height_unit: 'nm'
+                skiprows: 3
+                leveling: true
+
+        Args:
+            config: config.yaml 全体の設定辞書
+
+        Returns:
+            MeasuredSurface インスタンス
+        """
+        surface_cfg = config.get("surface", {})
+        measured_cfg = surface_cfg.get("measured", {})
+
+        path = measured_cfg.get("path")
+        if path is None:
+            raise ValueError("surface.measured.path が設定されていない。")
+
+        source_pixel_size_um = float(measured_cfg.get("source_pixel_size_um", 1.0))
+        height_unit = measured_cfg.get("height_unit", "um")
+        skiprows = int(measured_cfg.get("skiprows", 0))
+        leveling = bool(measured_cfg.get("leveling", True))
+
+        return cls.from_csv(
+            path=path,
+            source_pixel_size_um=source_pixel_size_um,
+            height_unit=height_unit,
+            skiprows=skiprows,
+            grid_size=int(surface_cfg.get("grid_size", 4096)),
+            pixel_size_um=float(surface_cfg.get("pixel_size_um", 0.25)),
+            leveling=leveling,
+        )
+
+    @classmethod
     def from_csv(
         cls,
         path: str | Path,

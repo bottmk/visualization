@@ -194,21 +194,59 @@ _ILLUMINATION_PRESETS = {
 _RGB_LUMINANCE_WEIGHTS = [0.0722, 0.7152, 0.2126]  # B, G, R
 
 
+def _compute_sparkle_single(
+    u_grid: np.ndarray,
+    v_grid: np.ndarray,
+    bsdf: np.ndarray,
+    omega_pupil: float,
+    sin_half: float,
+) -> list[float]:
+    """1種類のBSDFグリッドについて全画素の輝度リストを計算する（内部用）。"""
+    uv_r2 = u_grid**2 + v_grid**2
+    valid = uv_r2 <= 1.0
+    du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
+    dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
+
+    n_pix_u = max(1, int(1.0 / sin_half))
+    luminances: list[float] = []
+
+    for pu in range(-n_pix_u, n_pix_u + 1):
+        for pv in range(-n_pix_u, n_pix_u + 1):
+            u_center = pu * 2 * sin_half
+            v_center = pv * 2 * sin_half
+            pix_mask = (
+                valid
+                & (np.abs(u_grid - u_center) <= sin_half)
+                & (np.abs(v_grid - v_center) <= sin_half)
+            )
+            if not np.any(pix_mask):
+                continue
+            cos_s = np.sqrt(np.maximum(1.0 - uv_r2[pix_mask], 0.0))
+            lum = float(np.sum(bsdf[pix_mask] * cos_s) * du * dv * omega_pupil)
+            luminances.append(lum)
+
+    return luminances
+
+
 def compute_sparkle(
     u_grid: np.ndarray,
     v_grid: np.ndarray,
     bsdf: np.ndarray,
     sparkle_config: dict,
+    bsdf_per_wavelength: list[np.ndarray] | None = None,
 ) -> float:
     """ギラツキコントラスト Cs = σ/μ を計算する。
 
     ディスプレイ画素ごとにBSDFを積分し、輝度のばらつき（σ/μ）を計算する。
+    RGB照明モード（wavelengths_um に3波長を指定）の場合は CIE 1931 輝度加重平均を行う。
 
     Args:
         u_grid: 方向余弦 u グリッド（2D）
         v_grid: 方向余弦 v グリッド（2D）
-        bsdf: BSDF 値 [sr⁻¹]（2D）
+        bsdf: BSDF 値 [sr⁻¹]（2D）— 単波長モードで使用
         sparkle_config: 設定辞書（config.yaml の metrics.sparkle セクション）
+        bsdf_per_wavelength: 複数波長のBSDFリスト（波長順、wavelengths_um と対応）。
+            指定時は CIE 輝度加重でスパークルを合成する。
 
     Returns:
         ギラツキコントラスト Cs = σ/μ
@@ -224,48 +262,37 @@ def compute_sparkle(
     wavelengths_um = list(illumination.get("wavelengths_um", [0.55]))
 
     # 瞳孔の立体角 [sr]
-    pupil_radius_mm = pupil_mm / 2
-    omega_pupil = np.pi * (pupil_radius_mm / distance_mm) ** 2
+    omega_pupil = np.pi * (pupil_mm / 2 / distance_mm) ** 2
 
-    # 1画素の UV 空間での角度範囲
-    pixel_half_angle_rad = np.arctan(pixel_pitch_mm / 2 / distance_mm)
-    sin_half = np.sin(pixel_half_angle_rad)
+    # 1画素の UV 空間での半角
+    sin_half = np.sin(np.arctan(pixel_pitch_mm / 2 / distance_mm))
 
-    # グリッドの UV 解像度
-    uv_r2 = u_grid**2 + v_grid**2
-    valid = uv_r2 <= 1.0
-    du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
-    dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
+    # 複数波長モード（CIE 輝度加重平均）
+    if bsdf_per_wavelength is not None and len(bsdf_per_wavelength) == len(wavelengths_um) > 1:
+        # 波長に対応する CIE 輝度感度（標準値: 450/550/650nm ≒ B/G/R）
+        cie_weights = np.array(_RGB_LUMINANCE_WEIGHTS[: len(wavelengths_um)], dtype=np.float64)
+        cie_weights = cie_weights / cie_weights.sum()  # 正規化
 
-    # 波長ごとのBSDF積分（複数波長はRGB加重平均）
-    pixel_luminances: list[float] = []
-    n_pix_u = max(1, int(1.0 / sin_half))
-    n_pix_v = n_pix_u
+        # 各波長の画素輝度リストを加重合成
+        all_luminances_list = [
+            _compute_sparkle_single(u_grid, v_grid, bsdf_w, omega_pupil, sin_half)
+            for bsdf_w in bsdf_per_wavelength
+        ]
+        n_pixels = min(len(lst) for lst in all_luminances_list)
+        if n_pixels < 2:
+            return 0.0
+        combined = sum(
+            w * np.array(lst[:n_pixels])
+            for w, lst in zip(cie_weights, all_luminances_list)
+        )
+        arr = np.asarray(combined)
+    else:
+        # 単波長モード
+        luminances = _compute_sparkle_single(u_grid, v_grid, bsdf, omega_pupil, sin_half)
+        if len(luminances) < 2:
+            return 0.0
+        arr = np.array(luminances)
 
-    for pu in range(-n_pix_u, n_pix_u + 1):
-        for pv in range(-n_pix_v, n_pix_v + 1):
-            # 各画素の UV 中心
-            u_center = pu * 2 * sin_half
-            v_center = pv * 2 * sin_half
-
-            # 画素領域マスク
-            pix_mask = (
-                valid
-                & (np.abs(u_grid - u_center) <= sin_half)
-                & (np.abs(v_grid - v_center) <= sin_half)
-            )
-            if not np.any(pix_mask):
-                continue
-
-            cos_s = np.sqrt(np.maximum(1.0 - uv_r2[pix_mask], 0.0))
-            # 1画素の輝度 = BSDF 積分 × 瞳孔立体角
-            lum = float(np.sum(bsdf[pix_mask] * cos_s) * du * dv * omega_pupil)
-            pixel_luminances.append(lum)
-
-    if len(pixel_luminances) < 2:
-        return 0.0
-
-    arr = np.array(pixel_luminances)
     mu = float(np.mean(arr))
     if mu < 1e-30:
         return 0.0

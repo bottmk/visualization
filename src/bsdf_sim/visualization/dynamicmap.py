@@ -41,8 +41,7 @@ def _check_holoviews() -> None:
 
 # ── キャッシュ付き BSDF 計算 ─────────────────────────────────────────────────
 
-@functools.lru_cache(maxsize=256)
-def _cached_bsdf(
+def _compute_bsdf_raw(
     rq_um: float,
     lc_um: float,
     fractal_dim: float,
@@ -56,11 +55,7 @@ def _cached_bsdf(
     is_btdf: bool,
     seed: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """乱数シード固定の LRU キャッシュ付き BSDF 計算。
-
-    プレビュー用。同一パラメータの再計算をスキップする。
-    random_seed を固定することでキャッシュが正しく機能する。
-    """
+    """キャッシュなし BSDF 計算（内部用）。"""
     model = RandomRoughSurface(
         rq_um=rq_um,
         lc_um=lc_um,
@@ -79,6 +74,10 @@ def _cached_bsdf(
         n2=n2,
         is_btdf=is_btdf,
     )
+
+
+# モジュールレベルのデフォルトキャッシュ（maxsize=256）
+_cached_bsdf = functools.lru_cache(maxsize=256)(_compute_bsdf_raw)
 
 
 # ── ダッシュボード ────────────────────────────────────────────────────────────
@@ -128,10 +127,8 @@ class RandomRoughDynamicMap:
         self.preview_grid_size_idle = preview_grid_size_idle
         self.random_seed = random_seed
 
-        # LRU キャッシュサイズを動的に設定
-        _cached_bsdf.__wrapped__ = functools.lru_cache(maxsize=cache_size)(
-            _cached_bsdf.__wrapped__
-        )
+        # インスタンスごとに独立した LRU キャッシュを生成
+        self._cached_bsdf = functools.lru_cache(maxsize=cache_size)(_compute_bsdf_raw)
 
     def _compute_preview(
         self,
@@ -141,7 +138,7 @@ class RandomRoughDynamicMap:
         grid_size: int,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """指定グリッドサイズでプレビュー BSDF を計算する。"""
-        return _cached_bsdf(
+        return self._cached_bsdf(
             rq_um=round(rq_um, 5),
             lc_um=round(lc_um, 4),
             fractal_dim=round(fractal_dim, 3),
@@ -249,7 +246,6 @@ class RandomRoughDynamicMap:
         def update_metrics(rq: float, lc: float, fractal: float) -> str:
             try:
                 from ..metrics.surface import compute_all_surface_metrics
-                from ..models.base import HeightMap
 
                 model = RandomRoughSurface(
                     rq_um=rq, lc_um=lc, fractal_dim=fractal,
@@ -259,11 +255,24 @@ class RandomRoughDynamicMap:
                 hm = model.get_height_map()
                 m = compute_all_surface_metrics(hm)
                 return (
-                    f"**表面形状指標**\n"
+                    "**ISO 25178-2 S-パラメータ**\n"
+                    f"- Sq = {m['sq_um']*1000:.2f} nm\n"
+                    f"- Sa = {m['sa_um']*1000:.2f} nm\n"
+                    f"- Sp = {m['sp_um']*1000:.2f} nm\n"
+                    f"- Sz = {m['sz_um']*1000:.2f} nm\n"
+                    f"- Ssk = {m['ssk']:.3f}\n"
+                    f"- Sku = {m['sku']:.3f}\n"
+                    f"- Sdq = {m['sdq_rad']:.4f} rad\n"
+                    f"- Sdr = {m['sdr_pct']:.4f} %\n"
+                    f"- Sal = {m['sal_um']:.3f} μm\n"
+                    f"- Str = {m['str']:.3f}\n"
+                    "\n**JIS B 0601 R-パラメータ**\n"
                     f"- Rq = {m['rq_um']*1000:.2f} nm\n"
                     f"- Ra = {m['ra_um']*1000:.2f} nm\n"
                     f"- Rz = {m['rz_um']*1000:.2f} nm\n"
-                    f"- Sdq = {m['sdq_rad']:.4f} rad"
+                    f"- Rsk = {m['rsk']:.3f}\n"
+                    f"- Rku = {m['rku']:.3f}\n"
+                    f"- Rsm = {m['rsm_um']:.3f} μm"
                 )
             except Exception:
                 return "指標計算中..."

@@ -405,7 +405,7 @@ pytest tests/ --cov=bsdf_sim --cov-report=html
 pytest tests/test_fft_bsdf.py -v
 ```
 
-現在のテスト数: **76件**（全 pass）
+現在のテスト数: **131件**（全 pass）
 
 | テストファイル | 対象 | テスト数 |
 |---|---|---|
@@ -413,7 +413,11 @@ pytest tests/test_fft_bsdf.py -v
 | `test_fft_bsdf.py` | Fresnel係数・FFT法BSDF | 11 |
 | `test_psd_bsdf.py` | PSD・Q因子・BSDF | 9 |
 | `test_metrics.py` | 表面形状指標（ISO 25178-2 / JIS B 0601）・光学指標 | 42 |
-| 合計 | | **76** |
+| `test_config_loader.py` | BSDFConfig 読み込み・プリセット解決・バリデーション | 17 |
+| `test_optimization.py` | 重複スキップ・BSDFOptimizer | 13 |
+| `test_measured.py` | MeasuredSurface 前処理・CSV・from_config | 17 |
+| `test_cli.py` | CLI コマンドスモークテスト | 8 |
+| 合計 | | **131** |
 
 ---
 
