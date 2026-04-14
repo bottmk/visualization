@@ -204,6 +204,19 @@ surface:
     overlap_mode: 'Maximum'   # 'Maximum'（最大値採用） / 'Additive'（加算）
 ```
 
+**MeasuredSurface パラメータ:**
+
+```yaml
+  measured:
+    path: 'data/surface.csv'      # CSV ファイルパス
+    source_pixel_size_um: 1.0     # 元データのピクセルサイズ [μm]
+    height_unit: 'nm'             # 'um' / 'nm' / 'm'
+    skiprows: 0                   # ヘッダ行のスキップ数
+    leveling: true                # 傾き・うねり成分を除去する
+```
+
+CSV は数値のみの行列形式（ヘッダなし）を想定。装置固有のフォーマットがある場合は `skiprows` でスキップ行数を指定する。
+
 ### psd — PSD法オプション
 
 ```yaml

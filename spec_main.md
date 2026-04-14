@@ -129,6 +129,7 @@ class BaseSurfaceModel:
 - **実測データモデル（`MeasuredSurface`）**
   - 処理: 欠損値補間、指定グリッドサイズへのリサンプリング、レベリング（傾き・うねり成分の除去）
   - 生ファイルフォーマット: 装置ごとのヘッダ情報を含む形式。実ファイル提供時にローダー仕様を追記する。
+  - `from_config(config: dict)`: `config.yaml` の `surface.measured` セクションから `MeasuredSurface` を直接生成するクラスメソッド。`path`（CSV ファイルパス）、`source_pixel_size_um`、`height_unit`（`'um'` / `'nm'` / `'m'`）、`skiprows`、`leveling` を読み取る。
 
 ---
 
@@ -231,6 +232,7 @@ adding_doubling:
    - 内部媒質層: 内部ヘイズ（微粒子）が存在する場合、Henyey-Greenstein（HG）位相関数等を用いてボリューム散乱行列をモデリングする。
 3. **Adding-Doubling法による合成**: 放射伝達理論における「加算方程式」を用い、表面・内部・裏面の散乱行列を反復的に倍増（Doubling）させながら結合（Adding）し、多重反射・多重透過を考慮したフィルム全体のトータルBSDFを計算する。
 4. **スパース性の活用**: データサイズを抑えつつ高周波な散乱特性を高速合成するため、行列のスパース性（疎性）を活用する。
+5. **2次元BSDFへの展開（`to_bsdf_2d`）**: 合成散乱行列から法線入射の1次元BSDFプロファイルを取り出し、参照グリッド（FFT/PSD法の UV グリッド）上に `scipy.interpolate.interp1d` で補間展開して2次元BSDFを生成する。これにより「MultiLayer」メソッドとして Parquet に保存し、FFT/PSD 結果と同一グリッド上で比較可能にする。
 
 ---
 
@@ -306,7 +308,8 @@ sparkle:
     preset: 'green'           # 'green' / 'rgb' / 'custom'
     wavelengths_um: null      # null のときはプリセット値を使用
                               # 単波長: [0.55] / RGB: [0.45, 0.55, 0.65]
-  # rgb プリセット: 3波長を個別計算後、輝度加重平均で合成
+  # rgb プリセット: 3波長を個別計算後、CIE 1931 輝度加重（B:0.0722, G:0.7152, R:0.2126）で合成
+  # compute_sparkle の bsdf_per_wavelength 引数に波長順の BSDF リストを渡すことで有効になる
 
   # ── グループ4：評価指標（固定） ────────────────────────────
   metrics:
@@ -569,6 +572,71 @@ panel==1.4.2
 | `test_doi_range` | DOI ∈ [0, 1] |
 | `test_doi_narrow_beam` | 法線集中ビームの DOI > 0.5 |
 
+#### 9.2.5. 設定読み込み・バリデーション（`tests/test_config_loader.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `test_wavelength` / `test_theta_i` / `test_n1_n2` | BSDFConfig プロパティの値取得 |
+| `test_is_brdf` / `test_is_btdf` | BRDF/BTDF モード判定 |
+| `test_theta_i_effective_btdf` | BTDF モード（150°）の有効入射角 = 30° |
+| `test_theta_90_raises` | theta_i=90° で ValueError |
+| `test_invalid_polarization_raises` | 未知の polarization で ValueError |
+| `test_zero_bsdf_floor_raises` / `test_negative_bsdf_floor_raises` | 非正の bsdf_floor で ValueError |
+| `test_smartphone_preset_distance` / `test_tablet_preset_distance` | Sparkle プリセット解決の数値確認 |
+| `test_green_illumination_wavelength` | green プリセット → wavelengths_um=[0.55] |
+| `test_unknown_preset_raises` | 未知プリセットで ValueError |
+| `test_manual_override_takes_priority` | 個別数値がプリセットより優先される |
+| `test_from_file_not_found` | 存在しないパスで FileNotFoundError |
+| `test_from_file_loads_yaml` | YAML ファイルから BSDFConfig を生成 |
+
+#### 9.2.6. 最適化ユーティリティ（`tests/test_optimization.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `test_lower_bound_maps_to_zero` / `test_upper_bound_maps_to_one` | `_normalize_params` の境界値 |
+| `test_midpoint` | 中点 → 0.5 |
+| `test_clamps_out_of_range` | 探索範囲外 → クリップ |
+| `test_multiple_params_order` | 複数パラメータの順序保持 |
+| `test_empty_history_is_not_duplicate` | 履歴なし → 重複でない |
+| `test_identical_params_is_duplicate` | 同一パラメータ → 重複 |
+| `test_distant_params_is_not_duplicate` | 遠いパラメータ → 重複でない |
+| `test_just_below_threshold_is_not_duplicate` | 閾値未満 → 重複 |
+| `test_threshold_zero_means_only_exact_match` | 閾値=0 → 完全一致のみ重複 |
+| `test_multiple_params` | 多次元正規化距離の確認 |
+| `test_runs_n_trials` | n_trials=5 で完了試行数=5 |
+| `test_duplicate_skip_reduces_completed` | 重複スキップが機能し完了試行数 ≤ n_trials |
+| `test_best_trials_summary_single_objective` | best_trials_summary の返り値キー確認 |
+
+#### 9.2.7. 実測データモデル（`tests/test_measured.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `test_generates_correct_grid_size` | grid_size が正しく設定される |
+| `test_leveling_removes_tilt` | レベリング後の平均 ≈ 0 |
+| `test_nan_removed_after_preprocessing` | NaN が補間で消去される |
+| `test_all_nan_returns_zero` | 全 NaN → ゼロ配列 |
+| `test_from_numpy_basic` / `test_from_numpy_pixel_size` | from_numpy の基本動作 |
+| `test_from_csv_um` | μm 単位の CSV 読み込み |
+| `test_from_csv_nm_converts_to_um` | nm → μm 単位変換 |
+| `test_from_csv_invalid_height_unit` | 未知の height_unit で ValueError |
+| `test_from_csv_file_not_found` | 存在しないパスで FileNotFoundError |
+| `test_from_csv_skiprows` | ヘッダ行をスキップして読み込み |
+| `test_from_config_basic` | from_config の基本動作（config 辞書から生成） |
+| `test_from_config_no_path_raises` | path 未指定で ValueError |
+| `test_from_config_height_unit_nm` | from_config で nm 単位の CSV を読み込み |
+
+#### 9.2.8. CLI コマンドスモークテスト（`tests/test_cli.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `test_version` | `bsdf --version` で 0.1.0 が含まれる |
+| `test_simulate_fft_only` | `--method fft` で正常終了（exit_code=0） |
+| `test_simulate_psd_only` | `--method psd` で正常終了 |
+| `test_simulate_both_methods` | `--method both` で正常終了 |
+| `test_simulate_saves_parquet` | `--save-parquet` で Parquet ファイルが生成される |
+| `test_simulate_missing_config_fails` | 存在しない config で終了コード≠0 |
+| `test_simulate_btdf_mode` | `theta_i=150°`（BTDF）で正常終了 |
+
 ---
 
 ### 9.3. 物理検証項目
@@ -592,11 +660,19 @@ panel==1.4.2
 | 項目 | 優先度 | 備考 |
 |---|---|---|
 | Adding-Doubling 多層合成の数値検証 | 高 | 単層 = 表面のみ計算と一致するか |
-| CLI エンドツーエンド（`bsdf simulate`） | 高 | subprocess でコマンド実行・出力確認 |
 | Parquet スキーマの読み書き往復 | 中 | 保存 → 読み込みでデータが一致するか |
-| MeasuredHeightMap CSV 読み込み | 中 | 単位変換・NaN補間の確認 |
+| Sparkle RGB 多波長モードの数値検証 | 中 | `bsdf_per_wavelength` 使用時の輝度加重が正しいか |
 | DynamicMap / Panel 可視化 | 低 | UIテストは手動確認 |
 | Optuna 最適化収束 | 低 | 既知パラメータへの収束確認 |
+
+**対応済みの項目（Phase B で実装）:**
+
+| 項目 | 対応ファイル |
+|---|---|
+| CLI エンドツーエンド（`bsdf simulate`） | `tests/test_cli.py`（9.2.8） |
+| MeasuredSurface CSV 読み込み・NaN補間 | `tests/test_measured.py`（9.2.7） |
+| BSDFConfig バリデーション・プリセット解決 | `tests/test_config_loader.py`（9.2.5） |
+| 重複スキップ・BSDFOptimizer | `tests/test_optimization.py`（9.2.6） |
 
 ---
 
