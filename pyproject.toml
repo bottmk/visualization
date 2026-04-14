@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bsdf-sim"
+version = "0.1.0"
+description = "AGフィルム光学散乱（BSDF）統合シミュレーション・最適化プログラム"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24,<3.0",
+    "scipy>=1.10,<2.0",
+    "optuna>=3.0,<5.0",
+    "mlflow>=2.0,<3.0",
+    "holoviews>=1.17,<2.0",
+    "panel>=1.0,<2.0",
+    "bokeh>=3.0",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "pyyaml>=6.0",
+    "click>=8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+
+[project.scripts]
+bsdf = "bsdf_sim.cli.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

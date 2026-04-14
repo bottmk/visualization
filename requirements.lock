@@ -1,0 +1,15 @@
+# requirements.lock - 完全固定バージョン（CI/CD用）
+# pyproject.toml の範囲指定と併用する二層構造
+# 更新時: pip-compile pyproject.toml --output-file requirements.lock
+
+numpy==1.26.4
+scipy==1.12.0
+optuna==3.6.1
+mlflow==2.13.0
+holoviews==1.18.3
+panel==1.4.2
+bokeh==3.4.1
+pandas==2.2.2
+pyarrow==16.0.0
+pyyaml==6.0.1
+click==8.1.7

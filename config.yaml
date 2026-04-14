@@ -1,0 +1,112 @@
+# BSDF シミュレーション設定ファイルサンプル
+# 物理単位はすべて μm（マイクロメートル）に統一
+# プリセット値は null を指定すると適用される。数値を指定するとプリセットより優先される。
+
+# ── 光学条件 ─────────────────────────────────────────────────────────────────
+simulation:
+  wavelength_um: 0.55           # 波長 [μm]
+  theta_i_deg: 0.0              # 入射天頂角 [deg]（<90°=BRDF、>90°=BTDF、=90°はエラー）
+  phi_i_deg: 0.0                # 入射方位角 [deg]
+  n1: 1.0                       # 入射側媒質の屈折率（空気=1.0）
+  n2: 1.5                       # 透過側媒質の屈折率（ガラス=1.5）
+  polarization: 'Unpolarized'   # 'S' / 'P' / 'Unpolarized'
+
+# ── 表面形状モデル ─────────────────────────────────────────────────────────────
+surface:
+  model: 'RandomRoughSurface'   # 'RandomRoughSurface' / 'SphericalArraySurface' / 'MeasuredSurface'
+  grid_size: 4096               # 本計算用グリッドサイズ（デフォルト: 4096）
+  pixel_size_um: 0.25           # ピクセルサイズ [μm]（物理サイズ = grid_size × pixel_size_um）
+
+  # RandomRoughSurface パラメータ
+  random_rough:
+    rq_um: 0.005                # RMS粗さ [μm]（例: 5nm = 0.005μm）
+    lc_um: 2.0                  # 相関長 [μm]
+    fractal_dim: 2.5            # フラクタル次元（2.0〜3.0）
+
+  # SphericalArraySurface パラメータ
+  spherical_array:
+    radius_um: 50.0             # 曲率半径 [μm]
+    base_height_um: 0.0         # ベース高さ [μm]
+    placement: 'Hexagonal'      # 'Grid' / 'Hexagonal' / 'Random' / 'PoissonDisk'
+    pitch_um: 50.0              # 配置ピッチ [μm]（Grid/Hexagonal用）
+    overlap_mode: 'Maximum'     # 'Maximum'（Max値採用） / 'Additive'（加算）
+
+  # MeasuredSurface パラメータ
+  measured:
+    file_path: 'data/surface.csv'  # 実測高さデータのファイルパス
+    # ローダー仕様は実ファイル提供後に追記
+
+# ── 多層BSDF合成（Adding-Doubling）───────────────────────────────────────────
+adding_doubling:
+  enabled: false                # true にすると多層合成を実行
+  precision: 'standard'         # 'fast' / 'standard' / 'high'
+  n_theta: null                 # null のときはプリセット値を使用
+  m_phi: null                   # null のときはプリセット値を使用
+  # プリセット: fast=(32,8) / standard=(128,18) / high=(256,36)
+
+  layers:
+    - type: 'surface'           # 表面AG凹凸層（FFT/PSD法のBSDFを使用）
+    - type: 'bulk'              # 内部ヘイズ層
+      hg_g: 0.8                 # Henyey-Greenstein 非対称パラメータ
+      scattering_coeff: 0.1     # 散乱係数 [μm⁻¹]
+      thickness_um: 100.0       # 層厚 [μm]
+    - type: 'surface'           # 裏面平滑層
+
+# ── PSD法オプション ───────────────────────────────────────────────────────────
+psd:
+  approx_mode: false            # false=完全形（Elson-Bennett）/ true=簡略形（Stover、高速）
+
+# ── 誤差計算 ──────────────────────────────────────────────────────────────────
+error_metrics:
+  bsdf_floor: 1.0e-6            # sr⁻¹ 装置のノイズフロアに合わせて変更
+
+# ── 評価指標 ──────────────────────────────────────────────────────────────────
+metrics:
+  haze:
+    enabled: true
+    half_angle_deg: 2.5         # ヘイズ境界角 [deg]
+  gloss:
+    enabled: true
+    angle_deg: 60.0             # グロス測定角 [deg]
+  doi:
+    enabled: true
+  sparkle:
+    enabled: true
+    viewing:
+      preset: 'smartphone'      # 'smartphone' / 'tablet' / 'monitor' / 'custom'
+      distance_mm: null         # null のときはプリセット値（300mm）
+      pupil_diameter_mm: null   # null のときはプリセット値（3mm）
+    display:
+      preset: 'fhd_smartphone'  # 'fhd_smartphone' / 'qhd_monitor' / '4k_monitor' / 'custom'
+      pixel_pitch_mm: null      # null のときはプリセット値（0.062mm）
+      subpixel_layout: null     # null のときはプリセット値（'rgb_stripe'）
+    illumination:
+      preset: 'green'           # 'green' / 'rgb' / 'custom'
+      wavelengths_um: null      # null のときはプリセット値（[0.55]）
+
+# ── Optuna 最適化 ─────────────────────────────────────────────────────────────
+optuna:
+  n_trials: 200
+  n_jobs: 1                     # 並列試行数（>1 で並列実行）
+  sampler: 'MOTPE'              # 'MOTPE'（多目的）/ 'TPE'（単目的）
+  objectives:
+    - metric: 'log_rmse'        # 最小化目標1: 実測データとのLog-RMSE
+      direction: 'minimize'
+    - metric: 'sparkle'         # 最小化目標2: ギラツキ
+      direction: 'minimize'
+  duplicate_skip:
+    enabled: true
+    distance_threshold: 0.01    # 正規化ユークリッド距離閾値
+
+# ── MLflow 管理 ───────────────────────────────────────────────────────────────
+mlflow:
+  tracking_uri: 'mlruns'        # MLflowトラッキングサーバーのURI（ローカル or リモート）
+  experiment_name: '01_BSDF_Raw_Data'
+
+# ── DynamicMap プレビュー ─────────────────────────────────────────────────────
+dynamicmap:
+  preview_grid_size_drag: 128   # ドラッグ中の解像度
+  preview_grid_size_idle: 512   # ドラッグ停止後の解像度
+  cache_size: 256               # LRUキャッシュのエントリ数
+  random_seed: 42               # プレビュー用乱数シード（固定）
+  default_preview_mode: 'reduced_area'  # 'reduced_area' / 'reduced_resolution'

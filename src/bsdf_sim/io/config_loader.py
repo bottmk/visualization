@@ -1,0 +1,237 @@
+"""YAML設定ファイルの読み込み・バリデーション・プリセット解決。"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+
+# ── プリセット定義 ────────────────────────────────────────────────────────────
+
+_VIEWING_PRESETS: dict[str, dict[str, float]] = {
+    "smartphone": {"distance_mm": 300.0, "pupil_diameter_mm": 3.0},
+    "tablet":     {"distance_mm": 350.0, "pupil_diameter_mm": 3.0},
+    "monitor":    {"distance_mm": 600.0, "pupil_diameter_mm": 3.0},
+}
+
+_DISPLAY_PRESETS: dict[str, dict[str, Any]] = {
+    "fhd_smartphone": {"pixel_pitch_mm": 0.062, "subpixel_layout": "rgb_stripe"},
+    "qhd_monitor":    {"pixel_pitch_mm": 0.124, "subpixel_layout": "rgb_stripe"},
+    "4k_monitor":     {"pixel_pitch_mm": 0.160, "subpixel_layout": "rgb_stripe"},
+}
+
+_ILLUMINATION_PRESETS: dict[str, dict[str, list[float]]] = {
+    "green": {"wavelengths_um": [0.55]},
+    "rgb":   {"wavelengths_um": [0.45, 0.55, 0.65]},
+}
+
+_ADDING_DOUBLING_PRESETS: dict[str, dict[str, int]] = {
+    "fast":     {"n_theta": 32,  "m_phi": 8},
+    "standard": {"n_theta": 128, "m_phi": 18},
+    "high":     {"n_theta": 256, "m_phi": 36},
+}
+
+
+def _resolve_preset(
+    section: dict[str, Any],
+    presets: dict[str, dict[str, Any]],
+    preset_key: str = "preset",
+) -> dict[str, Any]:
+    """プリセットと個別数値を解決する。
+
+    数値が明示されている場合（null でない）は数値を優先する。
+    数値が null の場合はプリセット値を使用する。
+    プリセットも未指定の場合はエラーとする。
+
+    Args:
+        section: YAML のセクション辞書
+        presets: プリセット定義辞書
+        preset_key: プリセット名のキー
+
+    Returns:
+        解決済みのパラメータ辞書
+    """
+    preset_name = section.get(preset_key)
+    result: dict[str, Any] = {}
+
+    if preset_name and preset_name != "custom":
+        if preset_name not in presets:
+            raise ValueError(f"未知のプリセット: '{preset_name}'。有効なプリセット: {list(presets.keys())}")
+        result.update(presets[preset_name])
+
+    # 個別数値でオーバーライド（null 以外の場合）
+    for key, value in section.items():
+        if key == preset_key:
+            continue
+        if value is not None:
+            result[key] = value
+
+    # すべての値が未設定の場合はエラー
+    if not result:
+        raise ValueError(
+            f"プリセットまたは個別数値を指定する必要がある。"
+            f"プリセット key='{preset_key}' が未指定かつ全値が null。"
+        )
+
+    return result
+
+
+class BSDFConfig:
+    """YAML設定ファイルを読み込み、プリセット解決とバリデーションを行うクラス。"""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        self._raw = config
+        self._resolved: dict[str, Any] = {}
+        self._resolve()
+        self._validate()
+
+    @classmethod
+    def from_file(cls, path: str | Path) -> "BSDFConfig":
+        """YAMLファイルから設定を読み込む。
+
+        Args:
+            path: 設定ファイルのパス
+
+        Returns:
+            BSDFConfig インスタンス
+        """
+        path = Path(path)
+        if not path.exists():
+            raise FileNotFoundError(f"設定ファイルが見つからない: {path}")
+        with path.open(encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+        return cls(raw)
+
+    def _resolve(self) -> None:
+        """プリセットを解決し、_resolved に格納する。"""
+        self._resolved = dict(self._raw)
+
+        # Adding-Doubling プリセット解決
+        if ad := self._raw.get("adding_doubling"):
+            precision = ad.get("precision", "standard")
+            resolved_ad = dict(_ADDING_DOUBLING_PRESETS.get(precision, _ADDING_DOUBLING_PRESETS["standard"]))
+            if ad.get("n_theta") is not None:
+                resolved_ad["n_theta"] = ad["n_theta"]
+            if ad.get("m_phi") is not None:
+                resolved_ad["m_phi"] = ad["m_phi"]
+            self._resolved["adding_doubling"] = {**ad, **resolved_ad}
+
+        # Sparkle プリセット解決
+        if metrics := self._raw.get("metrics"):
+            if sparkle := metrics.get("sparkle"):
+                resolved_sparkle = dict(sparkle)
+
+                if viewing := sparkle.get("viewing"):
+                    resolved_sparkle["viewing"] = _resolve_preset(viewing, _VIEWING_PRESETS)
+
+                if display := sparkle.get("display"):
+                    resolved_sparkle["display"] = _resolve_preset(display, _DISPLAY_PRESETS)
+
+                if illumination := sparkle.get("illumination"):
+                    resolved_sparkle["illumination"] = _resolve_preset(
+                        illumination, _ILLUMINATION_PRESETS
+                    )
+
+                self._resolved.setdefault("metrics", {})["sparkle"] = resolved_sparkle
+
+    def _validate(self) -> None:
+        """必須フィールドと値の範囲を検証する。"""
+        sim = self._resolved.get("simulation", {})
+
+        # theta_i = 90° はエラー
+        theta_i = sim.get("theta_i_deg", 0.0)
+        if abs(theta_i - 90.0) < 1e-6:
+            raise ValueError("theta_i_deg = 90° は未定義。BRDF(<90°) または BTDF(>90°) を指定すること。")
+
+        # polarization
+        pol = sim.get("polarization", "Unpolarized")
+        if pol not in ("S", "P", "Unpolarized"):
+            raise ValueError(f"polarization は 'S' / 'P' / 'Unpolarized' のいずれかでなければならない。値={pol}")
+
+        # bsdf_floor
+        floor = self._resolved.get("error_metrics", {}).get("bsdf_floor", 1e-6)
+        if floor <= 0:
+            raise ValueError(f"bsdf_floor は正の値でなければならない。値={floor}")
+
+    def get(self, key: str, default: Any = None) -> Any:
+        """解決済み設定から値を取得する。"""
+        return self._resolved.get(key, default)
+
+    def __getitem__(self, key: str) -> Any:
+        return self._resolved[key]
+
+    # ── ショートカットプロパティ ──────────────────────────────────────────
+
+    @property
+    def simulation(self) -> dict[str, Any]:
+        return self._resolved.get("simulation", {})
+
+    @property
+    def surface(self) -> dict[str, Any]:
+        return self._resolved.get("surface", {})
+
+    @property
+    def adding_doubling(self) -> dict[str, Any]:
+        return self._resolved.get("adding_doubling", {})
+
+    @property
+    def error_metrics(self) -> dict[str, Any]:
+        return self._resolved.get("error_metrics", {"bsdf_floor": 1e-6})
+
+    @property
+    def bsdf_floor(self) -> float:
+        return float(self.error_metrics.get("bsdf_floor", 1e-6))
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return self._resolved.get("metrics", {})
+
+    @property
+    def optuna(self) -> dict[str, Any]:
+        return self._resolved.get("optuna", {})
+
+    @property
+    def mlflow(self) -> dict[str, Any]:
+        return self._resolved.get("mlflow", {})
+
+    @property
+    def dynamicmap(self) -> dict[str, Any]:
+        return self._resolved.get("dynamicmap", {})
+
+    @property
+    def wavelength_um(self) -> float:
+        return float(self.simulation.get("wavelength_um", 0.55))
+
+    @property
+    def theta_i_deg(self) -> float:
+        return float(self.simulation.get("theta_i_deg", 0.0))
+
+    @property
+    def phi_i_deg(self) -> float:
+        return float(self.simulation.get("phi_i_deg", 0.0))
+
+    @property
+    def n1(self) -> float:
+        return float(self.simulation.get("n1", 1.0))
+
+    @property
+    def n2(self) -> float:
+        return float(self.simulation.get("n2", 1.5))
+
+    @property
+    def polarization(self) -> str:
+        return str(self.simulation.get("polarization", "Unpolarized"))
+
+    @property
+    def is_btdf(self) -> bool:
+        """BTDF モード（theta_i > 90°）かどうか。"""
+        return self.theta_i_deg > 90.0
+
+    @property
+    def theta_i_effective_deg(self) -> float:
+        """BTDF モード時に表面側座標系に換算した有効入射角。"""
+        if self.is_btdf:
+            return abs(180.0 - self.theta_i_deg)
+        return self.theta_i_deg
