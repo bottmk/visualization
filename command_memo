@@ -1,0 +1,23 @@
+# claude
+## 再開
+claude history
+claude --resume
+## 権限実行モード
+claude  /auto 
+claude --accept-edits "仕様書（docs/spec.md）を読み込み、src/ディレクトリ内にコードを実装してください"
+/accept-edits
+claude --dangerously-skip-permissions	/bypassPermissions
+  
+
+# github
+1. 変更されたファイルを確認
+git status
+
+# 2. 変更をステージングに追加
+git add .
+
+# 3. コミットメッセージを付けて保存
+git commit -m "Claude Codeによるコード生成・修正"
+
+# 4. GitHubのリポジトリに反映（Push）
+git push origin HEAD
