@@ -4,7 +4,13 @@ import numpy as np
 import pytest
 
 from bsdf_sim.models.base import HeightMap
-from bsdf_sim.metrics.surface import compute_rq, compute_ra, compute_rz, compute_sdq, compute_all_surface_metrics
+from bsdf_sim.metrics.surface import (
+    compute_rq, compute_ra, compute_rz, compute_sdq,
+    compute_sq, compute_sa, compute_sp, compute_sv, compute_sz,
+    compute_ssk, compute_sku, compute_sdr, compute_sal, compute_str,
+    compute_rp, compute_rv, compute_rsk, compute_rku, compute_rsm, compute_rc,
+    compute_all_surface_metrics,
+)
 from bsdf_sim.metrics.optical import compute_log_rmse, compute_haze, compute_gloss, compute_doi
 
 
@@ -45,9 +51,16 @@ class TestSurfaceMetrics:
         assert compute_rq(flat_height_map) == pytest.approx(0.0, abs=1e-10)
 
     def test_rq_sine(self, sine_height_map):
-        """正弦波の Rq = amplitude / sqrt(2)。"""
+        """正弦波（列方向変動）のプロファイル Rq。
+
+        sine_height_map は axis=0（列方向）に正弦変化し、行内は定数。
+        compute_rq は行・列両プロファイルを平均するため：
+          - 行プロファイル（定数）: Rq_row = 0
+          - 列プロファイル（正弦）: Rq_col = amplitude / sqrt(2)
+          - 平均 Rq = amplitude / (2*sqrt(2))
+        """
         amplitude = 0.01
-        expected = amplitude / np.sqrt(2)
+        expected = amplitude / (2 * np.sqrt(2))
         assert compute_rq(sine_height_map) == pytest.approx(expected, rel=0.05)
 
     def test_ra_positive(self, sine_height_map):
@@ -67,7 +80,115 @@ class TestSurfaceMetrics:
 
     def test_all_metrics_keys(self, sine_height_map):
         metrics = compute_all_surface_metrics(sine_height_map)
-        assert set(metrics.keys()) == {"rq_um", "ra_um", "rz_um", "sdq_rad"}
+        expected_keys = {
+            # ISO 25178-2 S-パラメータ
+            "sq_um", "sa_um", "sp_um", "sv_um", "sz_um",
+            "ssk", "sku", "sdq_rad", "sdr_pct", "sal_um", "str",
+            # JIS B 0601 R-パラメータ
+            "rq_um", "ra_um", "rz_um", "rp_um", "rv_um",
+            "rsk", "rku", "rsm_um", "rc_um",
+        }
+        assert set(metrics.keys()) == expected_keys
+
+
+class TestISO25178Metrics:
+    """ISO 25178-2 面パラメータのテスト。"""
+
+    def test_sq_flat(self, flat_height_map):
+        assert compute_sq(flat_height_map) == pytest.approx(0.0, abs=1e-10)
+
+    def test_sq_sine(self, sine_height_map):
+        """正弦波の Sq = amplitude / sqrt(2)。"""
+        amplitude = 0.01
+        assert compute_sq(sine_height_map) == pytest.approx(amplitude / np.sqrt(2), rel=0.05)
+
+    def test_sa_flat(self, flat_height_map):
+        assert compute_sa(flat_height_map) == pytest.approx(0.0, abs=1e-10)
+
+    def test_sa_positive(self, sine_height_map):
+        assert compute_sa(sine_height_map) > 0.0
+
+    def test_sp_positive(self, sine_height_map):
+        assert compute_sp(sine_height_map) > 0.0
+
+    def test_sv_positive(self, sine_height_map):
+        assert compute_sv(sine_height_map) > 0.0
+
+    def test_sz_equals_sp_plus_sv(self, sine_height_map):
+        """Sz = Sp + Sv が成立する。"""
+        sp = compute_sp(sine_height_map)
+        sv = compute_sv(sine_height_map)
+        sz = compute_sz(sine_height_map)
+        assert sz == pytest.approx(sp + sv, rel=1e-5)
+
+    def test_ssk_sine_near_zero(self, sine_height_map):
+        """正弦波は対称分布なので Ssk ≈ 0。"""
+        ssk = compute_ssk(sine_height_map)
+        assert abs(ssk) < 0.1
+
+    def test_ssk_flat(self, flat_height_map):
+        assert compute_ssk(flat_height_map) == pytest.approx(0.0, abs=1e-8)
+
+    def test_sku_sine(self, sine_height_map):
+        """正弦波の Sku = 1.5（理論値）。"""
+        sku = compute_sku(sine_height_map)
+        assert sku == pytest.approx(1.5, rel=0.05)
+
+    def test_sdr_flat(self, flat_height_map):
+        """平坦面の Sdr = 0%。"""
+        assert compute_sdr(flat_height_map) == pytest.approx(0.0, abs=1e-6)
+
+    def test_sdr_positive(self, sine_height_map):
+        """起伏のある面の Sdr > 0%。"""
+        assert compute_sdr(sine_height_map) > 0.0
+
+    def test_sal_positive(self, sine_height_map):
+        assert compute_sal(sine_height_map) > 0.0
+
+    def test_str_range(self, sine_height_map):
+        """Str は 0〜1 の範囲。"""
+        assert 0.0 <= compute_str(sine_height_map) <= 1.0
+
+
+class TestJISB0601Metrics:
+    """JIS B 0601 / ISO 4287 プロファイルパラメータのテスト。"""
+
+    def test_rp_positive(self, sine_height_map):
+        assert compute_rp(sine_height_map) > 0.0
+
+    def test_rv_positive(self, sine_height_map):
+        assert compute_rv(sine_height_map) > 0.0
+
+    def test_rp_rv_relation(self, sine_height_map):
+        """Rp と Rv の和は Rz 以下（プロファイル平均の性質）。"""
+        rp = compute_rp(sine_height_map)
+        rv = compute_rv(sine_height_map)
+        rz = compute_rz(sine_height_map)
+        assert rp + rv <= rz * 1.05  # プロファイル平均と全体値の差を考慮
+
+    def test_rsk_sine_near_zero(self, sine_height_map):
+        """正弦波は対称分布なので Rsk ≈ 0。"""
+        rsk = compute_rsk(sine_height_map)
+        assert abs(rsk) < 0.1
+
+    def test_rku_sine(self, sine_height_map):
+        """正弦波の Rku ≈ 1.5（理論値）。"""
+        rku = compute_rku(sine_height_map)
+        assert rku == pytest.approx(1.5, rel=0.1)
+
+    def test_rsm_positive(self, sine_height_map):
+        assert compute_rsm(sine_height_map) > 0.0
+
+    def test_rsm_flat(self, flat_height_map):
+        """平坦面では Rsm は物理サイズ（要素なし）。"""
+        rsm = compute_rsm(flat_height_map)
+        assert rsm == pytest.approx(flat_height_map.physical_size_um, rel=0.01)
+
+    def test_rc_positive(self, sine_height_map):
+        assert compute_rc(sine_height_map) > 0.0
+
+    def test_rc_flat(self, flat_height_map):
+        assert compute_rc(flat_height_map) == pytest.approx(0.0, abs=1e-10)
 
 
 class TestLogRMSE:
