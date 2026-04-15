@@ -128,8 +128,10 @@ class BaseSurfaceModel:
   - 重なり（干渉）処理: `Maximum`（Max値採用）, `Additive`（加算）
 - **実測データモデル（`MeasuredSurface`）**
   - 処理: 欠損値補間、指定グリッドサイズへのリサンプリング、レベリング（傾き・うねり成分の除去）
-  - 生ファイルフォーマット: 装置ごとのヘッダ情報を含む形式。実ファイル提供時にローダー仕様を追記する。
-  - `from_config(config: dict)`: `config.yaml` の `surface.measured` セクションから `MeasuredSurface` を直接生成するクラスメソッド。`path`（CSV ファイルパス）、`source_pixel_size_um`、`height_unit`（`'um'` / `'nm'` / `'m'`）、`skiprows`、`leveling` を読み取る。
+  - 汎用ローダー `from_csv()`: カンマ区切り、`height_unit`（`'um'` / `'nm'` / `'m'`）、`skiprows` 対応
+  - 装置固有ローダー（プラグイン方式）: `MeasuredSurface` のサブクラスを `custom_surfaces/<name>.py` に置くと `load_plugins()` が自動登録する。`config.yaml` で `model: '<ClassName>'` と指定するだけで使用可能。
+  - 実装例: `custom_surfaces/device_xyz.py` → `DeviceXyzSurface`（タブ区切り・5行ヘッダ・nm 単位）
+  - サンプルファイル・設定: `sample_inputs/` フォルダに格納
 
 ---
 
@@ -835,3 +837,4 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | BUG-003/004 修正 | enabled デフォルト値バグ（4指標）・sparkle ベクトル化・プログレスバー追加 | `d22ae09` |
 | 光学指標の手法別記録・目的関数統一 | simulate: haze_fft/haze_psd/haze_ml 形式で手法別記録。optimize: 全指標を統一記録＋objectives を config.yaml で指定可能に。_psd 指標指定時は PSD 自動計算 | — |
 | visualize レポート強化 | bsdf visualize: 1D プロファイル＋2D ヒートマップ（手法別）＋指標テーブルの Panel HTML 出力。simulate --log-to-mlflow: 表面形状 PNG・2D BSDF PNG を artifacts/plots/ に保存 | — |
+| 装置固有 CSV ローダー（プラグイン方式） | custom_surfaces/ に MeasuredSurface サブクラスを置くだけで自動登録。DeviceXyzSurface を実装例として追加。sample_inputs/ にサンプルファイル・config を格納 | — |

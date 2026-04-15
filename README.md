@@ -236,7 +236,7 @@ surface:
     overlap_mode: 'Maximum'   # 'Maximum'（最大値採用） / 'Additive'（加算）
 ```
 
-**MeasuredSurface パラメータ:**
+**MeasuredSurface パラメータ（汎用CSVローダー）:**
 
 ```yaml
   measured:
@@ -247,7 +247,21 @@ surface:
     leveling: true                # 傾き・うねり成分を除去する
 ```
 
-CSV は数値のみの行列形式（ヘッダなし）を想定。装置固有のフォーマットがある場合は `skiprows` でスキップ行数を指定する。
+CSV は数値のみのカンマ区切り行列形式を想定。
+
+**装置固有フォーマット（プラグイン方式）:**
+
+`MeasuredSurface` のサブクラスを `custom_surfaces/<name>.py` に実装すると自動登録される。
+
+```yaml
+surface:
+  model: 'DeviceXyzSurface'   # custom_surfaces/device_xyz.py が自動ロードされる
+  measured:
+    path: 'sample_inputs/device_xyz_sample.csv'
+    source_pixel_size_um: 0.5
+```
+
+サンプルファイルと設定例は `sample_inputs/` フォルダを参照。
 
 ### psd — PSD法オプション
 
@@ -405,7 +419,9 @@ dashboard.show()   # ブラウザで起動
 
 ### カスタム表面モデルの追加
 
-`custom_surfaces/` ディレクトリに Python ファイルを配置する。
+`custom_surfaces/` ディレクトリに Python ファイルを配置する。起動時に自動ロード・登録される。
+
+**パターン1: 新しい形状生成モデル**
 
 ```python
 # custom_surfaces/my_surface.py
@@ -418,12 +434,38 @@ class MySurface(BaseSurfaceModel):
         return np.zeros((grid_size, grid_size), dtype=np.float32)
 ```
 
+**パターン2: 装置固有CSVローダー（`MeasuredSurface` のサブクラス）**
+
+```python
+# custom_surfaces/my_device.py
+from bsdf_sim.models.measured import MeasuredSurface
+import numpy as np
+from pathlib import Path
+
+class MyDeviceSurface(MeasuredSurface):
+    @classmethod
+    def from_config(cls, config):
+        surface_cfg = config.get("surface", {})
+        measured_cfg = surface_cfg.get("measured", {})
+        path = Path(measured_cfg["path"])
+        data = np.loadtxt(path, delimiter="\t", skiprows=5) * 1e-3  # nm → μm
+        return cls(
+            height_data=data,
+            source_pixel_size_um=float(measured_cfg.get("source_pixel_size_um", 0.5)),
+            grid_size=int(surface_cfg.get("grid_size", 4096)),
+            pixel_size_um=float(surface_cfg.get("pixel_size_um", 0.25)),
+        )
+```
+
 config.yaml で指定：
 
 ```yaml
 surface:
-  model: 'MySurface'
+  model: 'MySurface'   # または 'MyDeviceSurface'
 ```
+
+実装例として `custom_surfaces/device_xyz.py`（`DeviceXyzSurface`）が同梱されている。  
+サンプルファイルと動作確認用 config は `sample_inputs/` を参照。
 
 ### カスタム評価指標の追加
 

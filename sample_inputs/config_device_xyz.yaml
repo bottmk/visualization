@@ -1,0 +1,33 @@
+# 装置XYZ フォーマット使用時の config.yaml サンプル
+# bsdf simulate --config sample_inputs/config_device_xyz.yaml -m fft で実行
+
+simulation:
+  wavelength_um: 0.55
+  theta_i_deg: 0.0
+  phi_i_deg: 0.0
+  n1: 1.0
+  n2: 1.5
+  polarization: 'Unpolarized'
+
+surface:
+  model: 'DeviceXyzSurface'     # custom_surfaces/device_xyz.py から自動ロード
+  grid_size: 512                # サンプルは 100×100 なので小さめに設定
+  pixel_size_um: 0.25
+  measured:
+    path: 'sample_inputs/device_xyz_sample.csv'
+    source_pixel_size_um: 0.5   # 計測ピクセルサイズ [μm]
+    leveling: true
+
+bsdf_floor: 1.0e-6
+
+metrics:
+  haze:
+    enabled: true
+    cone_half_angle_deg: 2.5
+  gloss:
+    enabled: true
+    specular_half_angle_deg: 2.5
+  doi:
+    enabled: false
+  sparkle:
+    enabled: false
