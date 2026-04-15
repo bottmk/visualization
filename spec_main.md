@@ -789,6 +789,33 @@ panel==1.4.2
 | `TestCLIVisualizeWriteBack::test_visualize_log_to_mlflow_writes_back_html` | HTML 無しの run に対して `visualize --log-to-mlflow` が `plots/report.html` を追記する |
 | `TestCLIVisualizeWriteBack::test_visualize_without_log_to_mlflow_no_write_back` | デフォルト（`--no-log-to-mlflow`）では書き戻さない |
 
+#### 9.2.13. run_id 解決とサブコマンド（`tests/test_run_id_resolver.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `TestResolveRunId::test_full_run_id_passthrough` | 32 文字の完全 run_id はそのまま返す |
+| `TestResolveRunId::test_latest_returns_most_recent` | `latest` で最新 run を取得 |
+| `TestResolveRunId::test_latest_N` | `latest-2` / `latest-3` で N 番目の最新を取得 |
+| `TestResolveRunId::test_latest_N_too_large_raises` | 存在件数より大きい N で ValueError |
+| `TestResolveRunId::test_best_min_metric` | `best:METRIC` で metric 最小の run |
+| `TestResolveRunId::test_best_min_explicit` | `best:METRIC:min` の明示指定 |
+| `TestResolveRunId::test_best_max_metric` | `best:METRIC:max` で metric 最大の run |
+| `TestResolveRunId::test_best_unknown_direction_raises` | 未知の方向指定で ValueError |
+| `TestResolveRunId::test_best_nonexistent_metric_raises` | metric を持たない run 群に対して ValueError |
+| `TestResolveRunId::test_prefix_unique_match` | 10 文字プレフィックスでユニーク run にマッチ |
+| `TestResolveRunId::test_prefix_too_short_raises` | 7 文字以下のプレフィックスは拒否 |
+| `TestResolveRunId::test_prefix_no_match_raises` | 該当しないプレフィックスで ValueError |
+| `TestResolveRunId::test_unknown_format_raises` | 不明な形式で ValueError |
+| `TestRunsListCLI::test_empty_experiment_shows_message` | 空の実験で適切なメッセージ |
+| `TestRunsListCLI::test_list_shows_short_id_and_metrics` | テーブルに short_id と metric 値が含まれる |
+| `TestRunsListCLI::test_list_sort_order` | `--sort-by METRIC --ascending` で昇順ソート |
+| `TestRunsListCLI::test_list_limit` | `--limit N` で表示件数制限 |
+| `TestRunsListCLI::test_list_custom_metrics_column` | `--metrics` でカスタム列指定 |
+| `TestVisualizeWithShortcut::test_visualize_with_latest` | `visualize --run-id latest` で HTML 生成 |
+| `TestVisualizeWithShortcut::test_visualize_with_best_metric` | `visualize --run-id best:haze_fft` で HTML 生成 |
+| `TestVisualizeWithShortcut::test_visualize_with_prefix` | プレフィックスで visualize が動作 |
+| `TestVisualizeWithShortcut::test_visualize_with_bad_shortcut_fails` | 未知の metric で visualize が exit_code ≠ 0 |
+
 ---
 
 ### 9.3. 物理検証項目
@@ -998,3 +1025,4 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | `bsdf dashboard` CLI + 多モデル対応 DynamicMap | 新 CLI サブコマンド `bsdf dashboard --config file.yaml --port 5006` でリアルタイムブラウザダッシュボードを起動。config.surface.model を判定して `RandomRoughDynamicMap` / `SphericalArrayDynamicMap` / `MeasuredSurfaceDynamicMap` のいずれかを起動（`create_dashboard_from_config()` ファクトリ）。`measured_bsdf.path` 指定時は `select_block()` で条件一致の実測ブロックを 1D プロファイルに黒点 Scatter で自動オーバーレイ。SphericalArraySurface は radius/pitch/placement/overlap_mode のスライダー＆セレクタ UI を追加、MeasuredSurface 系は固定表示。テスト 273→286件 | — |
 | simulate の MLflow 記録に HTML artifacts 追加 | `bsdf simulate --log-to-mlflow` が `plots/surface.html`（plot_heightmap）と `plots/bsdf_report.html`（plot_bsdf_report・多条件 Tabs・実測オーバーレイ込み）を自動生成して run artifacts に保存。MLflow UI の artifacts タブから HTML をクリックすると新タブで Bokeh インタラクティブ表示される。PNG は従来通りインライン表示可能。HTML 生成失敗時は警告のみで PNG は記録される（graceful degradation）。テスト 286→287件 | — |
 | visualize の MLflow 書き戻し機能 | `bsdf visualize --run-id <id> --log-to-mlflow` で生成した HTML を元 run の `artifacts/plots/` に追記アップロードする機能を追加（`MlflowClient.log_artifact` 使用）。optimize で大量の run を生成し、後から気になる run を選んで HTML を生成 → MLflow UI でクリック閲覧するワークフロー。optimize は従来通り HTML を生成しない（Parquet + metrics のみ）、visualize が必要な run にだけ後追いで生成する設計。テスト 287→289件 | — |
+| run_id 解決ヘルパー＋`bsdf runs list` サブコマンド | 長い run_id の入力を不要にする 3 つの仕組み: (1) `bsdf runs list --sort-by METRIC --limit N` で short_id + メトリクス + 開始時刻をテーブル表示（`rich` 依存なしのプレーンテキスト整形）、(2) `visualize --run-id` が `latest` / `latest-N` / `best:METRIC[:max]` / 8 文字以上のプレフィックスを完全な run_id に自動解決（`resolve_run_id()` ヘルパー）、(3) 旧形式の完全 run_id もそのまま通る。`list_runs()` / `resolve_run_id()` を `optimization/mlflow_logger.py` に追加。テスト 289→311件 | — |

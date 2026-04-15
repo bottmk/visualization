@@ -772,6 +772,119 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
 
 # ── visualize ─────────────────────────────────────────────────────────────────
 
+# ── runs（サブコマンドグループ）──────────────────────────────────────────────
+
+@cli.group()
+def runs() -> None:
+    """MLflow run の一覧・検索（list サブコマンド）。"""
+
+
+def _format_table(rows: list[list[str]], headers: list[str]) -> str:
+    """プレーンテキストの整形テーブルを返す（rich 依存なし）。"""
+    if not rows:
+        return "（該当 run なし）"
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            widths[i] = max(widths[i], len(cell))
+    sep = "  "
+    lines = [sep.join(h.ljust(widths[i]) for i, h in enumerate(headers))]
+    lines.append(sep.join("-" * w for w in widths))
+    for row in rows:
+        lines.append(sep.join(cell.ljust(widths[i]) for i, cell in enumerate(row)))
+    return "\n".join(lines)
+
+
+@runs.command("list")
+@click.option("--tracking-uri", default="mlruns", show_default=True, help="MLflow トラッキング URI")
+@click.option("--experiment", "-e", default=None,
+              help="実験名（省略時: 01_BSDF_Raw_Data）")
+@click.option("--sort-by", "-s", default=None,
+              help="並び順の基準メトリクス名（例: haze_fft）。省略時は開始時刻降順")
+@click.option("--ascending/--descending", default=True, show_default=True,
+              help="sort-by 指定時の昇順 / 降順")
+@click.option("--limit", "-n", default=20, show_default=True, type=int,
+              help="最大表示件数")
+@click.option("--metrics", "-m", default=None,
+              help="カンマ区切りの表示メトリクス名（例: haze_fft,sparkle_fft_wl525nm_aoi0_brdf）")
+def runs_list(
+    tracking_uri: str,
+    experiment: str | None,
+    sort_by: str | None,
+    ascending: bool,
+    limit: int,
+    metrics: str | None,
+) -> None:
+    """MLflow の run 一覧を表示する（visualize の --run-id を選ぶため）。
+
+    例:
+      bsdf runs list --sort-by haze_fft --limit 10
+      bsdf runs list -s sparkle_fft -m haze_fft,sparkle_fft --descending
+      bsdf runs list -e 02_Analysis_Reports -n 5
+    """
+    from ..optimization.mlflow_logger import EXPERIMENT_RAW_DATA, list_runs
+
+    exp_name = experiment or EXPERIMENT_RAW_DATA
+    rows_raw = list_runs(
+        tracking_uri=tracking_uri,
+        experiment_name=exp_name,
+        sort_by=sort_by,
+        ascending=ascending,
+        limit=limit,
+    )
+    if not rows_raw:
+        click.echo(f"実験 '{exp_name}' に run が見つからない。")
+        return
+
+    # メトリクス列の決定
+    if metrics:
+        metric_cols = [m.strip() for m in metrics.split(",") if m.strip()]
+    else:
+        # sort_by を先頭に、使われそうな代表メトリクスを自動選択
+        auto_preferred = ["haze_fft", "gloss_fft", "doi_fft", "sparkle_fft"]
+        metric_cols_set: list[str] = []
+        if sort_by:
+            metric_cols_set.append(sort_by)
+        for m in auto_preferred:
+            if m not in metric_cols_set:
+                metric_cols_set.append(m)
+        metric_cols = metric_cols_set
+
+    import datetime as _dt
+
+    headers = ["short_id", "started"] + metric_cols + ["run_name"]
+    table_rows: list[list[str]] = []
+    for r in rows_raw:
+        short_id = r["run_id"][:8]
+        started = _dt.datetime.fromtimestamp(r["start_time"] / 1000).strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        metric_vals = [
+            (f"{r['metrics'][m]:.4g}" if m in r["metrics"] else "-")
+            for m in metric_cols
+        ]
+        name = r["run_name"] or ""
+        table_rows.append([short_id, started] + metric_vals + [name])
+
+    click.echo(f"[実験: {exp_name}]  表示 {len(table_rows)} 件（最大 {limit}）")
+    if sort_by:
+        click.echo(f"sort_by: {sort_by} ({'昇順' if ascending else '降順'})")
+    click.echo()
+    click.echo(_format_table(table_rows, headers))
+    click.echo()
+    click.echo("使用例:")
+    click.echo(
+        "  bsdf visualize --run-id <short_id> --log-to-mlflow"
+    )
+    click.echo(
+        "  bsdf visualize --run-id latest --log-to-mlflow"
+    )
+    if sort_by:
+        click.echo(
+            f"  bsdf visualize --run-id 'best:{sort_by}' --log-to-mlflow"
+        )
+
+
 # ── dashboard ─────────────────────────────────────────────────────────────────
 
 @cli.command()
@@ -808,8 +921,11 @@ def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> No
 # ── visualize ─────────────────────────────────────────────────────────────────
 
 @cli.command()
-@click.option("--run-id", required=True, help="MLflow の run_id")
+@click.option("--run-id", required=True,
+              help="MLflow の run_id。'latest' / 'latest-N' / 'best:METRIC[:max]' / 8文字以上のプレフィックスも受理")
 @click.option("--tracking-uri", default="mlruns", show_default=True, help="MLflow トラッキング URI")
+@click.option("--experiment", "-e", default=None,
+              help="run_id 解決時の実験名（省略時: 01_BSDF_Raw_Data）")
 @click.option("--output", "-o", default="report.html", show_default=True, help="出力 HTML パス")
 @click.option("--scale", default="log", type=click.Choice(["linear", "log"]), show_default=True)
 @click.option("--log-to-mlflow/--no-log-to-mlflow", default=False, show_default=True,
@@ -817,19 +933,45 @@ def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> No
 def visualize(
     run_id: str,
     tracking_uri: str,
+    experiment: str | None,
     output: str,
     scale: str,
     log_to_mlflow: bool,
 ) -> None:
     """MLflow の Run から BSDF レポート（1D/2D/指標テーブル）を HTML 出力する。
 
+    --run-id は以下を受理:
+      - 32 文字の完全な run_id
+      - 'latest' / 'latest-2' / 'latest-5' — 最新から N 番目
+      - 'best:haze_fft' — metric の最小値 run
+      - 'best:sparkle_fft:max' — metric の最大値 run
+      - 8 文字以上のプレフィックス（例: 'a1b2c3d4'）
+
     `--log-to-mlflow` を指定すると、生成した HTML を元 run の
     `artifacts/plots/` に書き戻す。optimize で多数の run が出たあと、
     気になる run にだけレポートを追記してブラウザでクリック閲覧する用途。
     既に同名の artifact があれば上書きされる（MLflow の挙動に準拠）。
     """
-    from ..optimization.mlflow_logger import load_trial_dataframe, load_trial_metrics
+    from ..optimization.mlflow_logger import (
+        EXPERIMENT_RAW_DATA,
+        load_trial_dataframe,
+        load_trial_metrics,
+        resolve_run_id,
+    )
     from ..visualization.holoviews_plots import plot_bsdf_report, save_html
+
+    # ショートカット / プレフィックスを完全な run_id に解決
+    exp_name = experiment or EXPERIMENT_RAW_DATA
+    try:
+        resolved_run_id = resolve_run_id(
+            run_id, tracking_uri=tracking_uri, experiment_name=exp_name,
+        )
+    except ValueError as e:
+        raise click.ClickException(str(e)) from e
+
+    if resolved_run_id != run_id:
+        logger.info(f"run_id 解決: '{run_id}' → {resolved_run_id}")
+    run_id = resolved_run_id
 
     logger.info(f"run_id={run_id} のデータを読み込み中...")
     df = load_trial_dataframe(run_id, tracking_uri=tracking_uri)
