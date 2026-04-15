@@ -90,10 +90,21 @@ optuna:
   n_jobs: 1                     # 並列試行数（>1 で並列実行）
   sampler: 'MOTPE'              # 'MOTPE'（多目的）/ 'TPE'（単目的）
   objectives:
-    - metric: 'log_rmse'        # 最小化目標1: 実測データとのLog-RMSE
+    - metric: 'haze_fft'        # 最小化目標1: FFT法ヘイズ
       direction: 'minimize'
-    - metric: 'sparkle'         # 最小化目標2: ギラツキ
+    - metric: 'sparkle_fft'     # 最小化目標2: FFT法ギラツキ
       direction: 'minimize'
+    # PSD法の指標を使う例（指定するとPSD計算が自動で追加される）:
+    # - metric: 'haze_psd'
+    #   direction: 'minimize'
+    # 光学指標の例:
+    # - metric: 'gloss_fft'
+    #   direction: 'maximize'
+    # - metric: 'doi_fft'
+    #   direction: 'maximize'
+    # 表面形状指標の例（BSDFと独立して追加可能）:
+    # - metric: 'sq_um'
+    #   direction: 'minimize'
   duplicate_skip:
     enabled: true
     distance_threshold: 0.01    # 正規化ユークリッド距離閾値

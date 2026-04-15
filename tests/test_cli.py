@@ -101,6 +101,57 @@ class TestCLISimulate:
         ])
         assert result.exit_code == 0, result.output
 
+    def test_simulate_per_method_metrics_fft(self, config_file, tmp_path, caplog):
+        """--method fft のとき haze_fft がログ出力され haze_psd は出力されない。"""
+        import logging
+        runner = CliRunner()
+        with caplog.at_level(logging.INFO):
+            result = runner.invoke(cli, [
+                "simulate",
+                "--config", config_file,
+                "--output-dir", str(tmp_path / "out"),
+                "--method", "fft",
+                "--no-save-parquet",
+                "--no-log-to-mlflow",
+            ])
+        assert result.exit_code == 0, result.output
+        assert "haze_fft" in caplog.text
+        assert "haze_psd" not in caplog.text
+
+    def test_simulate_per_method_metrics_both(self, config_file, tmp_path, caplog):
+        """--method both のとき haze_fft と haze_psd が両方ログ出力される。"""
+        import logging
+        runner = CliRunner()
+        with caplog.at_level(logging.INFO):
+            result = runner.invoke(cli, [
+                "simulate",
+                "--config", config_file,
+                "--output-dir", str(tmp_path / "out"),
+                "--method", "both",
+                "--no-save-parquet",
+                "--no-log-to-mlflow",
+            ])
+        assert result.exit_code == 0, result.output
+        assert "haze_fft" in caplog.text
+        assert "haze_psd" in caplog.text
+
+    def test_simulate_per_method_metrics_psd(self, config_file, tmp_path, caplog):
+        """--method psd のとき haze_psd がログ出力され haze_fft は出力されない。"""
+        import logging
+        runner = CliRunner()
+        with caplog.at_level(logging.INFO):
+            result = runner.invoke(cli, [
+                "simulate",
+                "--config", config_file,
+                "--output-dir", str(tmp_path / "out"),
+                "--method", "psd",
+                "--no-save-parquet",
+                "--no-log-to-mlflow",
+            ])
+        assert result.exit_code == 0, result.output
+        assert "haze_psd" in caplog.text
+        assert "haze_fft" not in caplog.text
+
     def test_simulate_saves_parquet(self, config_file, tmp_path):
         """--save-parquet フラグで Parquet ファイルが生成される。"""
         out_dir = tmp_path / "out"

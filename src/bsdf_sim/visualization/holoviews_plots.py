@@ -369,6 +369,184 @@ def save_heightmap_png(
     plt.close(fig)
 
 
+def save_bsdf_2d_png(
+    u: np.ndarray,
+    v: np.ndarray,
+    bsdf: np.ndarray,
+    path: str | Path,
+    title: str = "BSDF 2D Heatmap",
+    method: str = "",
+    log_scale: bool = True,
+    dpi: int = 150,
+    n_grid: int = 256,
+) -> None:
+    """2D BSDF ヒートマップを PNG ファイルとして保存する（matplotlib 使用）。
+
+    1D/2D 入力どちらにも対応。半球外（u²+v²>1）をマスクして表示。
+
+    Args:
+        u, v: 方向余弦（1D または 2D）
+        bsdf: BSDF 値（u/v と同形状）
+        path: 保存先パス
+        title: タイトル
+        method: 手法名（タイトルに付加）
+        log_scale: True の場合 log10 スケール
+        dpi: 解像度
+        n_grid: 再構築グリッドサイズ
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from scipy.interpolate import griddata
+
+    # 1D に flatten して半球内のみ抽出
+    u_f = u.ravel().astype(np.float64)
+    v_f = v.ravel().astype(np.float64)
+    bsdf_f = bsdf.ravel().astype(np.float64)
+    valid = u_f ** 2 + v_f ** 2 <= 1.0
+    u_f, v_f, bsdf_f = u_f[valid], v_f[valid], bsdf_f[valid]
+
+    # 正規グリッドに補間
+    axis = np.linspace(-1.0, 1.0, n_grid)
+    u_grid, v_grid = np.meshgrid(axis, axis, indexing="ij")
+    bsdf_2d = griddata(
+        (u_f, v_f), bsdf_f,
+        (u_grid, v_grid),
+        method="linear",
+        fill_value=0.0,
+    )
+    bsdf_2d[u_grid ** 2 + v_grid ** 2 > 1.0] = np.nan
+
+    data = np.log10(np.maximum(bsdf_2d, 1e-10)) if log_scale else bsdf_2d
+    label = "log10(BSDF [sr-1])" if log_scale else "BSDF [sr-1]"
+
+    fig, ax = plt.subplots(figsize=(5, 5))
+    im = ax.imshow(
+        data.T, origin="lower", extent=[-1, 1, -1, 1],
+        cmap="viridis", aspect="equal",
+    )
+    theta = np.linspace(0, 2 * np.pi, 200)
+    ax.plot(np.cos(theta), np.sin(theta), "w--", linewidth=0.8)
+    plt.colorbar(im, ax=ax, label=label, fraction=0.046)
+    ax.set_xlabel("u = sin(ts)cos(ps)")
+    ax.set_ylabel("v = sin(ts)sin(ps)")
+    method_str = f" [{method}]" if method else ""
+    ax.set_title(f"{title}{method_str}")
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
+def df_to_2d_grid(
+    df_method: "pd.DataFrame",
+    n_grid: int = 256,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """long-format DataFrame の (u, v, bsdf) から 2D グリッドを再構築する。
+
+    scipy.interpolate.griddata で正規グリッドに補間する。
+
+    Args:
+        df_method: method でフィルタ済みの BSDF DataFrame
+        n_grid: 出力グリッドサイズ
+
+    Returns:
+        (u_grid, v_grid, bsdf_2d) — いずれも (n_grid, n_grid) の ndarray
+    """
+    from scipy.interpolate import griddata
+
+    u_pts = df_method["u"].values.astype(np.float64)
+    v_pts = df_method["v"].values.astype(np.float64)
+    bsdf_pts = df_method["bsdf"].values.astype(np.float64)
+
+    axis = np.linspace(-1.0, 1.0, n_grid)
+    u_grid, v_grid = np.meshgrid(axis, axis, indexing="ij")
+
+    bsdf_2d = griddata(
+        (u_pts, v_pts), bsdf_pts,
+        (u_grid, v_grid),
+        method="linear",
+        fill_value=0.0,
+    )
+    bsdf_2d[u_grid ** 2 + v_grid ** 2 > 1.0] = 0.0
+
+    return u_grid, v_grid, bsdf_2d.astype(np.float32)
+
+
+def plot_bsdf_report(
+    df: "pd.DataFrame",
+    metrics: dict[str, float] | None = None,
+    scale: str = "log",
+    title: str = "BSDF Report",
+    n_grid: int = 256,
+) -> Any:
+    """1D プロファイル・2D ヒートマップ・指標テーブルをまとめた Panel レポートを生成する。
+
+    Args:
+        df: BSDF Parquet DataFrame（long format）
+        metrics: MLflow から取得した指標辞書（省略可）
+        scale: 'linear' / 'log'
+        title: レポートタイトル
+        n_grid: 2D ヒートマップのグリッドサイズ
+
+    Returns:
+        Panel Column レイアウト
+    """
+    _check_holoviews()
+
+    # ── 1D オーバーレイ ─────────────────────────────────────────────────────────
+    plot_1d = plot_bsdf_1d_overlay(df, scale=scale, title="1D BSDF Profile")
+
+    # ── 2D ヒートマップ（手法別）────────────────────────────────────────────────
+    method_order = ["FFT", "PSD", "MultiLayer", "measured"]
+    methods_in_df = [m for m in method_order if m in df["method"].unique()]
+
+    heatmap_plots = []
+    for method in methods_in_df:
+        df_m = df[df["method"] == method]
+        u_g, v_g, bsdf_2d = df_to_2d_grid(df_m, n_grid=n_grid)
+        hm = plot_bsdf_2d_heatmap(
+            u_g, v_g, bsdf_2d,
+            title=f"2D BSDF [{method}]",
+            log_scale=(scale == "log"),
+        )
+        heatmap_plots.append(hm)
+
+    # ── 指標テーブル ─────────────────────────────────────────────────────────────
+    components: list[Any] = [
+        pn.pane.Markdown(f"## {title}"),
+        plot_1d,
+    ]
+
+    if heatmap_plots:
+        components.append(pn.Row(*heatmap_plots))
+
+    if metrics:
+        rows = []
+        for k in sorted(metrics.keys()):
+            suffix = next(
+                (s for s in ("_fft", "_psd", "_ml") if k.endswith(s)), None
+            )
+            if suffix:
+                category = f"Optical ({suffix[1:].upper()})"
+                metric_name = k[: -len(suffix)]
+            else:
+                category = "Surface"
+                metric_name = k
+            rows.append({
+                "Category": category,
+                "Metric": metric_name,
+                "Key": k,
+                "Value": f"{metrics[k]:.6g}",
+            })
+        metrics_df = pd.DataFrame(rows)[["Category", "Metric", "Value"]]
+        components.append(pn.pane.Markdown("### Metrics"))
+        components.append(pn.pane.DataFrame(metrics_df, index=False, width=500))
+
+    return pn.Column(*components)
+
+
 def save_html(plot: Any, path: str | Path, title: str = "BSDF Report") -> None:
     """HoloViews / Panel オブジェクトを HTML ファイルとして保存する。
 

@@ -833,3 +833,5 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | spec/README 更新 | 形状指標仕様を spec_main.md Section 5.1・README に反映 | `4a7f9af` |
 | Phase A〜D 修正一括 | BUG-005/006・to_bsdf_2d()・from_config()・sparkle RGB加重・テスト 76→131件 | `90f352e`, `a508446` |
 | BUG-003/004 修正 | enabled デフォルト値バグ（4指標）・sparkle ベクトル化・プログレスバー追加 | `d22ae09` |
+| 光学指標の手法別記録・目的関数統一 | simulate: haze_fft/haze_psd/haze_ml 形式で手法別記録。optimize: 全指標を統一記録＋objectives を config.yaml で指定可能に。_psd 指標指定時は PSD 自動計算 | — |
+| visualize レポート強化 | bsdf visualize: 1D プロファイル＋2D ヒートマップ（手法別）＋指標テーブルの Panel HTML 出力。simulate --log-to-mlflow: 表面形状 PNG・2D BSDF PNG を artifacts/plots/ に保存 | — |

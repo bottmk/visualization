@@ -42,16 +42,16 @@ class RawDataLogger:
         metrics: dict[str, float],
         df: pd.DataFrame,
         run_name: str | None = None,
-        heatmap_path: str | Path | None = None,
+        plot_paths: "list[str | Path] | None" = None,
     ) -> str:
         """1 Trial の結果を MLflow に記録する。
 
         Args:
             params: 形状パラメータ辞書
-            metrics: 評価指標辞書（haze, gloss, log_rmse 等）
+            metrics: 評価指標辞書（haze_fft, gloss_psd 等）
             df: BSDF データ DataFrame（Parquet として保存）
             run_name: Run の名前（省略時は自動生成）
-            heatmap_path: 2D ヒートマップ画像のパス（省略可）
+            plot_paths: artifacts/plots/ に保存する画像パスのリスト（省略可）
 
         Returns:
             MLflow の run_id
@@ -72,9 +72,10 @@ class RawDataLogger:
                 df.to_parquet(parquet_path, index=False, engine="pyarrow")
                 mlflow.log_artifact(str(parquet_path), artifact_path="data")
 
-            # ヒートマップ画像の保存（オプション）
-            if heatmap_path is not None:
-                mlflow.log_artifact(str(heatmap_path), artifact_path="plots")
+            # プロット画像の保存（オプション）
+            if plot_paths:
+                for p in plot_paths:
+                    mlflow.log_artifact(str(p), artifact_path="plots")
 
             return run.info.run_id
 
@@ -116,6 +117,22 @@ class AnalysisLogger:
             mlflow.log_artifact(str(html_path), artifact_path="reports")
 
             return run.info.run_id
+
+
+def load_trial_metrics(run_id: str, tracking_uri: str = "mlruns") -> dict[str, float]:
+    """01_BSDF_Raw_Data の Run から metrics 辞書を取得する。
+
+    Args:
+        run_id: MLflow の run_id
+        tracking_uri: MLflow トラッキング URI
+
+    Returns:
+        metrics 辞書（キー: 指標名、値: float）
+    """
+    mlflow.set_tracking_uri(tracking_uri)
+    client = mlflow.tracking.MlflowClient()
+    run = client.get_run(run_id)
+    return dict(run.data.metrics)
 
 
 def load_trial_dataframe(run_id: str, tracking_uri: str = "mlruns") -> pd.DataFrame:
