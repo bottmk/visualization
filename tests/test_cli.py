@@ -227,8 +227,12 @@ class TestCLIMultiCondition:
         result = self._run(cfg, tmp_path, "multi_wl")
         assert result.exit_code == 0, result.output
         df = self._load_result(tmp_path, "multi_wl")
-        wls = df[df["method"] == "FFT"]["wavelength_um"].unique()
-        assert len(wls) == 3
+        wls = set(df[df["method"] == "FFT"]["wavelength_um"].unique())
+        # ユーザー指定の 3 波長が存在
+        for w in (0.465, 0.525, 0.630):
+            assert any(abs(float(wl) - w) < 1e-4 for wl in wls), f"{w} not in {wls}"
+        # Haze が有効なので代表波長 0.555 も追加される
+        assert any(abs(float(wl) - 0.555) < 1e-4 for wl in wls)
 
     def test_multi_theta_i(self, tmp_path):
         cfg = {**_MINIMAL_CONFIG}
@@ -241,6 +245,76 @@ class TestCLIMultiCondition:
         df = self._load_result(tmp_path, "multi_theta")
         thetas = df[df["method"] == "FFT"]["theta_i_deg"].unique()
         assert len(thetas) == 3
+
+    def test_representative_wavelength_added_for_standards_metrics(self, tmp_path):
+        """Haze 有効 × 多波長 → 代表波長 0.555μm の追加 sim が走る。"""
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": [0.465, 0.525, 0.630],
+        }
+        # Haze 有効（デフォルト設定のまま）
+        result = self._run(cfg, tmp_path, "rep_wl")
+        assert result.exit_code == 0, result.output
+        df = self._load_result(tmp_path, "rep_wl")
+        wls = sorted(df[df["method"] == "FFT"]["wavelength_um"].unique())
+        assert len(wls) == 4  # 3 + 代表波長 1
+        assert any(abs(float(w) - 0.555) < 1e-4 for w in wls)
+
+    def test_representative_wavelength_reused_when_in_list(self, tmp_path):
+        """wavelength_um に 0.555 が含まれる場合は追加 sim なし。"""
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": [0.465, 0.555, 0.630],  # 0.555 を含む
+        }
+        result = self._run(cfg, tmp_path, "rep_in_list")
+        assert result.exit_code == 0, result.output
+        df = self._load_result(tmp_path, "rep_in_list")
+        wls = sorted(df[df["method"] == "FFT"]["wavelength_um"].unique())
+        assert len(wls) == 3  # 重複計算なし
+
+    def test_representative_wavelength_custom(self, tmp_path):
+        """metrics.representative_wavelength_um で代表波長を変更可能。"""
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": [0.465, 0.525, 0.630],
+        }
+        cfg["metrics"] = {
+            **_MINIMAL_CONFIG["metrics"],
+            "representative_wavelength_um": 0.500,  # 500nm をカスタム指定
+        }
+        result = self._run(cfg, tmp_path, "rep_custom")
+        assert result.exit_code == 0, result.output
+        df = self._load_result(tmp_path, "rep_custom")
+        wls = sorted(df[df["method"] == "FFT"]["wavelength_um"].unique())
+        assert any(abs(float(w) - 0.500) < 1e-4 for w in wls)
+
+    def test_haze_unaffected_by_wavelength_list(self, tmp_path):
+        """多波長設定でも haze_fft は 1 つのみ記録される（波長サフィックス無し）。"""
+        from bsdf_sim.io.parquet_schema import load_parquet
+
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": [0.465, 0.525, 0.630],
+        }
+        # Haze のみ有効
+        cfg["metrics"] = {
+            "haze":    {"enabled": True, "half_angle_deg": 2.5},
+            "gloss":   {"enabled": False},
+            "doi":     {"enabled": False},
+            "sparkle": {"enabled": False},
+        }
+        result = self._run(cfg, tmp_path, "haze_single")
+        assert result.exit_code == 0, result.output
+        # Parquet には多波長 + 代表波長の BSDF が保存されるが、
+        # haze の値は log から確認できないので、計算完了のみ確認
+        df = self._load_result(tmp_path, "haze_single")
+        # 代表波長 0.555 が含まれる
+        wls = sorted(df[df["method"] == "FFT"]["wavelength_um"].unique())
+        assert any(abs(float(w) - 0.555) < 1e-4 for w in wls)
 
     def test_multi_mode_brdf_btdf(self, tmp_path):
         cfg = {**_MINIMAL_CONFIG}
@@ -266,6 +340,13 @@ class TestCLIMultiCondition:
             "wavelength_um": [0.465, 0.630],
             "theta_i_deg": [0.0, 20.0],
         }
+        # Haze を無効化して代表波長の追加 sim を走らせない
+        cfg["metrics"] = {
+            "haze":    {"enabled": False},
+            "gloss":   {"enabled": False},
+            "doi":     {"enabled": False},
+            "sparkle": {"enabled": False},
+        }
         config_path = tmp_path / "config_grid.yaml"
         config_path.write_text(yaml.dump(cfg), encoding="utf-8")
 
@@ -280,7 +361,7 @@ class TestCLIMultiCondition:
         assert result.exit_code == 0, result.output
         df = load_parquet(tmp_path / "out" / "bsdf_data.parquet")
         unique_keys = df[["wavelength_um", "theta_i_deg"]].drop_duplicates()
-        assert len(unique_keys) == 4  # 2 λ × 2 θ
+        assert len(unique_keys) == 4  # 2 λ × 2 θ（代表波長 sim はスキップされる）
 
 
 class TestCLIMeasuredBsdfReal:
@@ -341,6 +422,13 @@ class TestCLIMeasuredBsdfReal:
             "path": str(self.SAMPLE),
             "match_measured": True,
         }
+        # Haze を無効化して代表波長の追加 sim をスキップ
+        cfg["metrics"] = {
+            "haze":    {"enabled": False},
+            "gloss":   {"enabled": False},
+            "doi":     {"enabled": False},
+            "sparkle": {"enabled": False},
+        }
         config_path = tmp_path / "config_auto.yaml"
         config_path.write_text(yaml.dump(cfg), encoding="utf-8")
 
@@ -355,7 +443,7 @@ class TestCLIMeasuredBsdfReal:
         assert result.exit_code == 0, result.output
 
         df = load_parquet(tmp_path / "out" / "bsdf_data.parquet")
-        # 3 λ × 4 AOI × 2 mode = 24 ユニーク条件
+        # 3 λ × 4 AOI × 2 mode = 24 ユニーク条件（代表波長 sim はスキップ）
         unique = df[df["method"] == "FFT"][
             ["wavelength_um", "theta_i_deg", "mode"]
         ].drop_duplicates()

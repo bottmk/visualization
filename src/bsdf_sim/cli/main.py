@@ -202,6 +202,97 @@ def simulate(
             ))
             logger.info(f"          PSD 完了 ({_elapsed(t0)})")
 
+    # ── 代表波長での Haze/Gloss/DOI 用 BSDF を確保 ────────────────────────
+    # 規格（JIS K 7136 / ISO 14782 / ASTM D1003 等）は CIE 白色光源 + V(λ)
+    # で規定されており、本実装は V(λ) ピーク付近の単波長近似を採用する。
+    # 代表波長は metrics.representative_wavelength_um（デフォルト 0.555μm）。
+    #
+    # Haze/Gloss/DOI のどれかが有効なときだけ代表波長条件を確保する。
+    standards_enabled = any(
+        cfg.metrics.get(k) is not None and cfg.metrics[k].get("enabled", True)
+        for k in ("haze", "gloss", "doi")
+    )
+    rep_wl_um = cfg.representative_wavelength_um
+    # 代表条件の θ_i, mode は sim 条件リストの先頭を採用
+    primary_cond = conditions[0]
+    rep_theta_i = float(primary_cond["theta_i_deg"])
+    rep_mode = str(primary_cond["mode"])
+    rep_is_btdf = rep_mode == "BTDF"
+
+    # 既存の計算済み BSDF に代表波長と一致するものがあるか検索
+    rep_key: tuple | None = None
+    for cond_key in method_bsdf_by_cond.keys():
+        wl_k, theta_k, mode_k = cond_key
+        if (
+            abs(wl_k - rep_wl_um) < 1e-6
+            and abs(theta_k - rep_theta_i) < 1e-6
+            and mode_k == rep_mode
+        ):
+            rep_key = cond_key
+            break
+
+    if not standards_enabled:
+        # Haze/Gloss/DOI を使わない → 代表波長 sim は不要
+        pass
+    elif rep_key is None:
+        # リスト内に代表波長が無い → 追加で 1 条件計算
+        logger.info(
+            f"代表波長 {rep_wl_um * 1000:.0f}nm の追加 sim を実行中 "
+            f"(θ_i={rep_theta_i:.1f}°, {rep_mode}, Haze/Gloss/DOI 用)"
+        )
+        rep_key = (rep_wl_um, rep_theta_i, rep_mode)
+        method_bsdf_by_cond[rep_key] = {}
+
+        if method in ("fft", "both"):
+            t0 = time.perf_counter()
+            u_r, v_r, bsdf_r = compute_bsdf_fft(
+                height_map=hm,
+                wavelength_um=rep_wl_um,
+                theta_i_deg=rep_theta_i,
+                phi_i_deg=primary_cond["phi_i_deg"],
+                n1=primary_cond["n1"],
+                n2=primary_cond["n2"],
+                polarization=primary_cond["polarization"],
+                is_btdf=rep_is_btdf,
+            )
+            method_bsdf_by_cond[rep_key]["fft"] = (u_r, v_r, bsdf_r)
+            if u_primary is None:
+                u_primary, v_primary, bsdf_primary = u_r, v_r, bsdf_r
+            all_dfs.append(build_dataframe(
+                u_r, v_r, bsdf_r, "FFT",
+                rep_theta_i, primary_cond["phi_i_deg"], rep_wl_um,
+                primary_cond["polarization"], is_btdf=rep_is_btdf,
+            ))
+            logger.info(f"          代表波長 FFT 完了 ({_elapsed(t0)})")
+
+        if method in ("psd", "both"):
+            t0 = time.perf_counter()
+            u_r, v_r, bsdf_r = compute_bsdf_psd(
+                height_map=hm,
+                wavelength_um=rep_wl_um,
+                theta_i_deg=rep_theta_i,
+                phi_i_deg=primary_cond["phi_i_deg"],
+                n1=primary_cond["n1"],
+                n2=primary_cond["n2"],
+                polarization=primary_cond["polarization"],
+                is_btdf=rep_is_btdf,
+                approx_mode=approx_mode,
+            )
+            method_bsdf_by_cond[rep_key]["psd"] = (u_r, v_r, bsdf_r)
+            if u_primary is None:
+                u_primary, v_primary, bsdf_primary = u_r, v_r, bsdf_r
+            all_dfs.append(build_dataframe(
+                u_r, v_r, bsdf_r, "PSD",
+                rep_theta_i, primary_cond["phi_i_deg"], rep_wl_um,
+                primary_cond["polarization"], is_btdf=rep_is_btdf,
+            ))
+            logger.info(f"          代表波長 PSD 完了 ({_elapsed(t0)})")
+    else:
+        logger.info(
+            f"代表波長 {rep_wl_um * 1000:.0f}nm は既存の sim 条件に含まれる "
+            f"(θ_i={rep_theta_i:.1f}°, {rep_mode}) — 再利用"
+        )
+
     # Adding-Doubling 多層合成（主条件のみ）
     if cfg.adding_doubling.get("enabled", False) and bsdf_primary is not None:
         if multi:
@@ -243,43 +334,66 @@ def simulate(
         import pandas as pd
         df_combined = pd.concat(all_dfs, ignore_index=True)
 
-        # [4] 光学指標（条件 × 手法ごとに計算）
+        # [4] 光学指標計算
+        # Haze / Gloss / DOI：代表波長 1 条件のみ（規格準拠近似、列固定）
+        # Sparkle：条件ごと（波長依存を保持、サフィックス付き記録）
         enabled_metrics = [
             k for k in ("haze", "gloss", "doi", "sparkle")
             if cfg.metrics.get(k) is not None and cfg.metrics[k].get("enabled", True)
         ]
         logger.info(
-            f"[4/4] 光学指標計算中... ({', '.join(enabled_metrics) or 'なし'}) × "
-            f"{len(method_bsdf_by_cond)} 条件"
+            f"[4/4] 光学指標計算中... ({', '.join(enabled_metrics) or 'なし'})"
         )
         t0 = time.perf_counter()
         all_optical_metrics: dict[str, float] = {}
-        for cond_key, method_data in method_bsdf_by_cond.items():
-            wl_um, theta_i, mode = cond_key
-            for method_key, (u_m, v_m, bsdf_m) in method_data.items():
-                metrics_m = compute_all_optical_metrics(
-                    u_grid=u_m,
-                    v_grid=v_m,
-                    bsdf=bsdf_m,
-                    config=cfg.metrics,
-                    bsdf_floor=cfg.bsdf_floor,
+
+        # --- 規格準拠指標（Haze/Gloss/DOI）：代表波長のみ ---
+        rep_method_data = method_bsdf_by_cond.get(rep_key, {}) if rep_key is not None else {}
+        standards_metrics_cfg = {
+            k: v for k, v in cfg.metrics.items() if k in ("haze", "gloss", "doi")
+        }
+        if standards_metrics_cfg and rep_method_data:
+            for method_key, (u_r, v_r, bsdf_r) in rep_method_data.items():
+                metrics_r = compute_all_optical_metrics(
+                    u_grid=u_r, v_grid=v_r, bsdf=bsdf_r,
+                    config=standards_metrics_cfg, bsdf_floor=cfg.bsdf_floor,
                 )
-                for k, val in metrics_m.items():
-                    if multi:
-                        # 多条件時は条件サフィックス付き
-                        suffix = (
-                            f"_{method_key}"
-                            f"_wl{int(round(wl_um * 1000))}nm"
-                            f"_aoi{int(round(theta_i))}"
-                            f"_{mode.lower()}"
-                        )
-                    else:
-                        suffix = f"_{method_key}"
-                    all_optical_metrics[f"{k}{suffix}"] = val
+                for k, val in metrics_r.items():
+                    # サフィックス無し: haze_fft / gloss_fft / doi_fft
+                    all_optical_metrics[f"{k}_{method_key}"] = val
+
+        # --- Sparkle：条件ごとに記録 ---
+        sparkle_cfg = cfg.metrics.get("sparkle")
+        if sparkle_cfg is not None and sparkle_cfg.get("enabled", True):
+            sparkle_only_cfg = {"sparkle": sparkle_cfg}
+            for cond_key, method_data in method_bsdf_by_cond.items():
+                wl_um, theta_i, mode = cond_key
+                for method_key, (u_m, v_m, bsdf_m) in method_data.items():
+                    metrics_m = compute_all_optical_metrics(
+                        u_grid=u_m, v_grid=v_m, bsdf=bsdf_m,
+                        config=sparkle_only_cfg, bsdf_floor=cfg.bsdf_floor,
+                    )
+                    for k, val in metrics_m.items():
+                        if multi:
+                            suffix = (
+                                f"_{method_key}"
+                                f"_wl{int(round(wl_um * 1000))}nm"
+                                f"_aoi{int(round(theta_i))}"
+                                f"_{mode.lower()}"
+                            )
+                        else:
+                            suffix = f"_{method_key}"
+                        all_optical_metrics[f"{k}{suffix}"] = val
+
         logger.info(f"      完了 ({_elapsed(t0)})")
         if not multi:
             for k, val in all_optical_metrics.items():
                 logger.info(f"        {k} = {val:.6f}")
+        else:
+            # 代表波長指標のみ個別表示
+            for k in sorted(all_optical_metrics):
+                if any(k.startswith(f"{m}_") and "_wl" not in k for m in ("haze", "gloss", "doi")):
+                    logger.info(f"        {k} = {all_optical_metrics[k]:.6f}")
 
         # 実測データとの結合＋Log-RMSE（条件ごと）
         if measured_dfs:

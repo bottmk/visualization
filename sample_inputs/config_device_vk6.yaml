@@ -56,6 +56,10 @@ error_metrics:
   bsdf_floor: 1.0e-6
 
 metrics:
+  # Haze/Gloss/DOI は規格準拠のため代表波長 1 つでのみ計算される。
+  # 多波長 simulation でも haze_fft / gloss_fft / doi_fft の列は 1 つ固定。
+  representative_wavelength_um: 0.555   # V(λ) ピーク付近
+
   haze:
     enabled: true
     cone_half_angle_deg: 2.5
@@ -66,5 +70,5 @@ metrics:
     enabled: false
   sparkle:
     enabled: false
-    # 多波長時は波長ごとに独立に計算・記録される
+    # Sparkle は波長ごとに独立計算・記録される
     # (例: sparkle_fft_wl465nm_aoi0_brdf / sparkle_fft_wl525nm_aoi0_brdf)

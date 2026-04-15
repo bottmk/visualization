@@ -348,3 +348,20 @@ class BSDFConfig:
     def match_tolerance_nm(self) -> float:
         """sim 条件と実測ブロックのマッチング許容波長 [nm]。デフォルト 5.0nm。"""
         return float(self.measured_bsdf.get("tolerance_nm", 5.0))
+
+    # ── 代表波長（規格準拠の Haze/Gloss/DOI 計算用）────────────────────────
+
+    @property
+    def representative_wavelength_um(self) -> float:
+        """Haze/Gloss/DOI を計算する代表波長 [μm]。デフォルト 0.555（V(λ) ピーク）。
+
+        JIS K 7136 / ISO 14782 / ASTM D1003（Haze）、ISO 2813 / ASTM D523
+        （Gloss）、ASTM D5767（DOI）等の規格は CIE 白色光源 + 明所視応答
+        V(λ) で規定されている。本実装は V(λ) ピーク波長（555nm）での単波長
+        近似を採用する（AG フィルム等、凹凸 >> 波長の構造では近似誤差 1〜5%）。
+
+        `simulation.wavelength_um` が list でも、Haze/Gloss/DOI の値は
+        この 1 波長でのみ計算されるため、列数は常に `haze_fft` / `gloss_fft`
+        / `doi_fft` の 1 つずつに固定される。
+        """
+        return float(self.metrics.get("representative_wavelength_um", 0.555))

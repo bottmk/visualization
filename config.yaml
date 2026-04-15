@@ -4,8 +4,11 @@
 
 # ── 光学条件 ─────────────────────────────────────────────────────────────────
 simulation:
-  wavelength_um: 0.55           # 波長 [μm]
+  # wavelength_um / theta_i_deg / mode はスカラ（1 条件）または list（多条件）を受理。
+  # list を指定すると直積展開で 1 run 内に全条件の BSDF が計算される。
+  wavelength_um: 0.55           # 波長 [μm]（例: 0.55 または [0.465, 0.525, 0.630]）
   theta_i_deg: 0.0              # 入射天頂角 [deg]（<90°=BRDF、>90°=BTDF、=90°はエラー）
+  # mode: 'BRDF'                # 省略時は theta_i_deg から自動判定
   phi_i_deg: 0.0                # 入射方位角 [deg]
   n1: 1.0                       # 入射側媒質の屈折率（空気=1.0）
   n2: 1.5                       # 透過側媒質の屈折率（ガラス=1.5）
@@ -62,6 +65,13 @@ error_metrics:
 
 # ── 評価指標 ──────────────────────────────────────────────────────────────────
 metrics:
+  # Haze/Gloss/DOI は規格（JIS K 7136 / ISO 2813 / ASTM D5767 等）が CIE 白色光源 +
+  # V(λ) 明所視応答で規定されているため、本実装は代表波長 1 つでの単波長近似を採用。
+  # `simulation.wavelength_um` を list で指定しても、これら 3 指標は代表波長でのみ
+  # 計算され、結果は haze_fft / gloss_fft / doi_fft（波長サフィックス無し）として記録される。
+  # Sparkle と Log-RMSE は波長ごとに独立計算される。詳細は spec_main.md 5.3 節参照。
+  representative_wavelength_um: 0.555   # 省略時のデフォルト（V(λ) ピーク付近）
+
   haze:
     enabled: true
     half_angle_deg: 2.5         # ヘイズ境界角 [deg]

@@ -307,13 +307,10 @@ sparkle:
     subpixel_layout: null     # 'rgb_stripe' / 'bgr_stripe' / 'pentile'
   # プリセット: fhd_smartphone=0.062mm/rgb_stripe, qhd_monitor=0.124mm/rgb_stripe
 
-  # ── グループ3：照明条件 ──────────────────────────────────
-  illumination:
-    preset: 'green'           # 'green' / 'rgb' / 'custom'
-    wavelengths_um: null      # null のときはプリセット値を使用
-                              # 単波長: [0.55] / RGB: [0.45, 0.55, 0.65]
-  # rgb プリセット: 3波長を個別計算後、CIE 1931 輝度加重（B:0.0722, G:0.7152, R:0.2126）で合成
-  # compute_sparkle の bsdf_per_wavelength 引数に波長順の BSDF リストを渡すことで有効になる
+  # ── グループ3：照明条件 ──（廃止・`illumination` は読み込まれない）
+  # 多波長解析は `simulation.wavelength_um` を list にする方法で行う。
+  # 各波長で独立に Sparkle が計算され、`sparkle_fft_wl525nm_aoi0_brdf`
+  # のようにサフィックス付きで記録される。
 
   # ── グループ4：評価指標（固定） ────────────────────────────
   metrics:
@@ -322,6 +319,78 @@ sparkle:
 ```
 
 **プリセット優先ルール**: 数値が指定されている場合（null でない）は数値を優先。数値が null の場合はプリセット値を使用。プリセットも未指定の場合はエラーとする。
+
+---
+
+### 5.3. 規格対応と波長依存性
+
+**結論先出し**：本実装では **Haze・Gloss・DOI は代表波長 1 つだけで計算**し、`simulation.wavelength_um` の list 設定に影響されない。一方 **Sparkle・Log-RMSE・BSDF 本体**は波長ごとに独立計算される。
+
+#### 5.3.1. 各指標の規格と光源規定
+
+業界規格では Haze・Gloss・DOI・Sparkle は **いずれも CIE 標準光源（白色）× 明所視応答 V(λ)** で規定されている：
+
+| 指標 | 主な規格 | 光源 | 検出器応答 |
+|---|---|---|---|
+| **Haze** | JIS K 7136 / ISO 14782 / ASTM D1003 | CIE Illuminant D65 / C | CIE 1931 Y（明所視 V(λ)） |
+| **Gloss** | JIS Z 8741 / ISO 2813 / ASTM D523 | CIE Illuminant C | CIE 1931 Y |
+| **DOI（写像性）** | JIS K 7374 / ASTM D5767 | 白色光源（A または C） | 明所視 V(λ) |
+| **Sparkle（GD 値）** | SEMI D63 / IDMS | 白色バックライト（D65 等） | 明所視 V(λ) |
+
+本実装は **代表波長 1 つでの単波長近似**を採用する。デフォルトは **555 nm（V(λ) ピーク）**。凹凸 ≫ 波長の AG フィルム等では近似誤差は典型的に 1〜5%（波長依存が弱い）。
+
+#### 5.3.2. 代表波長の設定
+
+```yaml
+metrics:
+  representative_wavelength_um: 0.555   # デフォルト（V(λ) ピーク付近）
+```
+
+**挙動ルール:**
+- `metrics.representative_wavelength_um` が省略された場合は **0.555 μm** を使用する。
+- `simulation.wavelength_um` が list でも、代表波長のみで Haze/Gloss/DOI を計算する。
+- 代表波長が `wavelength_um` のリストに含まれる場合は、既存計算の BSDF を再利用（追加計算なし）。
+- 含まれない場合は、主条件（list 先頭の θ_i, mode）で代表波長の BSDF を **1 条件だけ追加計算**する。この BSDF は Parquet にも `wavelength_um=0.555` の行として保存される。
+- Haze/Gloss/DOI が全て `enabled: false` の場合は代表波長の追加計算自体がスキップされる（無駄な sim なし）。
+
+#### 5.3.3. `wavelength_um` リストが影響する指標・しない指標
+
+| 項目 | `wavelength_um: [...]` の影響 | 記録形式 |
+|---|---|---|
+| **BSDF 本体** | **あり** — 波長ごとに独立計算 | Parquet 行に `wavelength_um` 列、method で区別 |
+| **Haze** | **なし** — 代表波長のみ | `haze_fft` / `haze_psd`（1 つ固定） |
+| **DOI** | **なし** — 代表波長のみ | `doi_fft` / `doi_psd`（1 つ固定） |
+| **Gloss** | **なし** — 代表波長のみ | `gloss_fft` / `gloss_psd`（1 つ固定） |
+| **Sparkle** | **あり** — 各波長で独立計算 | `sparkle_fft_wl<X>nm_aoi<Y>_<mode>` |
+| **Log-RMSE** | **あり** — 各条件で独立計算 | `log_rmse_<method>_wl<X>nm_aoi<Y>_<mode>` |
+
+**なぜ Sparkle だけ波長依存を残すか:** Sparkle はディスプレイの RGB サブピクセル発光パターンの評価にも使われるため、波長別の内訳を残しておくと色依存の解析が可能。規格値は従来の単波長近似でも得られる（代表波長のみの条件で記録される）。
+
+#### 5.3.4. Log-RMSE の定義
+
+Log-RMSE は実測 BSDF とシミュレーション BSDF の **対数空間 RMS 誤差**で、BSDF の 5〜6 桁の動的レンジ全体で誤差を均等に評価する。
+
+$$\text{Log-RMSE} = \sqrt{\frac{1}{N_\text{valid}} \sum_{i \in \text{valid}} \left( \log_{10}\max(\text{BSDF}_{\text{sim}, i}, F) - \log_{10}(\text{BSDF}_{\text{meas}, i}) \right)^2}$$
+
+- $F$ = `error_metrics.bsdf_floor`（ノイズフロア、デフォルト $10^{-6}$ sr⁻¹）
+- $\text{valid}$ = 実測 > $F$ の点のみ
+- シミュレーション値はゼロ割り防止のため $F$ でクリップ
+
+**解釈:**
+| Log-RMSE 値 | 物理的意味 |
+|---|---|
+| 0.0 | 完全一致 |
+| 0.3 | 平均して約 2 倍の差 |
+| 1.0 | 平均して 10 倍の差 |
+| 2.0 | 平均して 100 倍の差 |
+
+**計算方法:**
+1. `merge_sim_and_measured()` が sim DataFrame の各 `(method, wavelength_um, theta_i_deg, mode)` に対して、実測 DataFrame 内で `tolerance_deg` / `tolerance_nm` 内の一致ブロックを検索
+2. 実測ブロックの UV 座標に sim 側を線形補間（`scipy.interpolate.griddata`）
+3. 対数空間で RMS を計算
+4. 結果を sim 行の `log_rmse` 列に書き込む
+
+`metric.representative_wavelength_um` の設定は Log-RMSE には**無関係**（全条件で独立に計算される）。
 
 ---
 
@@ -678,6 +747,10 @@ panel==1.4.2
 | `TestCLIMultiCondition::test_parquet_contains_multiple_conditions` | Parquet 内に 2λ × 2θ = 4 条件が保存される |
 | `TestCLIMeasuredBsdfReal::test_simulate_with_measured_bsdf_cli_option` | `--measured-bsdf` で実測読み込み・log_rmse 計算・Parquet に measured 行 |
 | `TestCLIMeasuredBsdfReal::test_simulate_match_measured_auto_conditions` | `match_measured: true` で実測 24 条件を sim に自動採用 |
+| `TestCLIMultiCondition::test_representative_wavelength_added_for_standards_metrics` | Haze 有効 × 多波長 → 代表波長 0.555μm の追加 sim が走る |
+| `TestCLIMultiCondition::test_representative_wavelength_reused_when_in_list` | `wavelength_um` に 0.555 が含まれる場合は追加 sim なし（既存 BSDF 再利用） |
+| `TestCLIMultiCondition::test_representative_wavelength_custom` | `metrics.representative_wavelength_um: 0.500` 指定で代表波長を変更可能 |
+| `TestCLIMultiCondition::test_haze_unaffected_by_wavelength_list` | 多波長設定でも Haze は代表波長でのみ計算される |
 
 #### 9.2.11. visualize 実測オーバーレイ・多条件レポート（`tests/test_visualize_overlay.py`）
 
@@ -899,3 +972,5 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | BSDF 実測ファイルリーダー（プラグイン方式） | custom_bsdf_readers/ に BaseBsdfFileReader サブクラスを置くだけで自動登録。LightToolsBsdfReader（LightTools/MiniDiff .bsdf）を実装。build_measured_dataframe に is_btdf 引数を追加。テスト 172→213件 | — |
 | 多条件シミュレーション＋実測 BSDF 統合 | 1 run 内で多波長・多入射角・BRDF/BTDF を実行可能に（案 2-B: スカラ/list 両対応）。`simulation.wavelength_um` / `theta_i_deg` / `mode` に list を指定すると直積展開。`measured_bsdf` セクションで実測ファイルを紐づけ、`match_measured: true` で実測条件を sim に自動採用、`--measured-bsdf` CLI オプションで上書き。条件ごとに `merge_sim_and_measured()` が Log-RMSE を自動計算。`select_block` / `get_conditions` ヘルパー追加。テスト 213→255件 | — |
 | visualize 実測オーバーレイ＋多条件対応 | `plot_bsdf_1d_overlay` で条件未指定時に df 先頭を自動選択（多条件 Parquet でも "データなし" にならない）。`mode='BRDF'/'BTDF'` フィルタ追加。`plot_bsdf_report` は多条件時に `pn.Tabs` で条件ごとに 1D+2D+Log-RMSE を切替表示。実測行（`method='measured'`）は 1D に黒点 Scatter で自動オーバーレイ。テスト 255→269件 | — |
+| Sparkle illumination 削除 | `compute_sparkle` の `bsdf_per_wavelength` 引数と CIE 輝度加重分岐を削除（多条件 simulate ループから到達不能な dead code だった）。`_ILLUMINATION_PRESETS` / `_RGB_LUMINANCE_WEIGHTS` 定数を除去。config の `sparkle.illumination` セクションは読み込み時に silently 無視される（後方互換） | — |
+| 代表波長で規格準拠 Haze/Gloss/DOI | `metrics.representative_wavelength_um`（デフォルト 0.555 μm, V(λ) ピーク）を追加。Haze/Gloss/DOI は `wavelength_um` list の影響を受けず代表波長 1 条件でのみ計算され、列は `haze_fft`/`gloss_fft`/`doi_fft` に固定（波長サフィックス無し）。代表波長が list に含まれない場合は追加 1 条件 sim を実行、含まれる場合は再利用。Sparkle/Log-RMSE は従来通り波長ごと。spec Section 5.3「規格対応と波長依存性」を追加。テスト 269→273件 | — |
