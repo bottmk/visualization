@@ -768,6 +768,24 @@ panel==1.4.2
 | `TestSparkleMultiWavelength::test_sparkle_multi_wavelength_keys_in_parquet` | 多波長 × Sparkle 有効で 3 波長の BSDF が Parquet に保存 |
 | `TestSparkleMultiWavelength::test_sparkle_metric_suffix_helper` | メトリクスキーのサフィックス生成規則 `_<method>_wl<X>nm_aoi<Y>_<mode>` |
 
+#### 9.2.12. リアルタイム BSDF ダッシュボード（`tests/test_dashboard.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `TestFactoryDispatch::test_random_rough_dispatches_correctly` | `surface.model='RandomRoughSurface'` → `RandomRoughDynamicMap` |
+| `TestFactoryDispatch::test_spherical_array_dispatches_correctly` | `surface.model='SphericalArraySurface'` → `SphericalArrayDynamicMap` |
+| `TestFactoryDispatch::test_measured_surface_dispatches_correctly` | `DeviceVk6Surface` 等 → `MeasuredSurfaceDynamicMap` |
+| `TestCreateDashboard::test_random_rough_creates_dashboard` | RandomRough ダッシュボードが Panel Column を生成 |
+| `TestCreateDashboard::test_spherical_array_creates_dashboard` | SphericalArray ダッシュボードが Panel Column を生成 |
+| `TestMeasuredOverlay::test_measured_blocks_loaded_in_dashboard` | `measured_bsdf.path` 指定時に 24 ブロック読み込み + 条件一致マッチング |
+| `TestMeasuredOverlay::test_measured_profile_extraction` | `_measured_profile()` が phi≈0° の (θ_s, BSDF) 1D ペアを返す |
+| `TestMeasuredOverlay::test_no_measured_file_returns_none_profile` | 実測ファイル未指定時は None を返す |
+| `TestMake1DOverlay::test_sim_only` | sim のみの 1D オーバーレイ（Scatter なし） |
+| `TestMake1DOverlay::test_sim_with_measured` | sim + 実測の 1D オーバーレイ（黒点 Scatter 追加） |
+| `TestDashboardCLI::test_dashboard_command_in_help` | `bsdf --help` に dashboard が表示 |
+| `TestDashboardCLI::test_dashboard_subcommand_help` | `bsdf dashboard --help` に `--config` / `--port` |
+| `TestDashboardCLI::test_dashboard_missing_config_fails` | 存在しない config で exit_code ≠ 0 |
+
 ---
 
 ### 9.3. 物理検証項目
@@ -974,3 +992,4 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | visualize 実測オーバーレイ＋多条件対応 | `plot_bsdf_1d_overlay` で条件未指定時に df 先頭を自動選択（多条件 Parquet でも "データなし" にならない）。`mode='BRDF'/'BTDF'` フィルタ追加。`plot_bsdf_report` は多条件時に `pn.Tabs` で条件ごとに 1D+2D+Log-RMSE を切替表示。実測行（`method='measured'`）は 1D に黒点 Scatter で自動オーバーレイ。テスト 255→269件 | — |
 | Sparkle illumination 削除 | `compute_sparkle` の `bsdf_per_wavelength` 引数と CIE 輝度加重分岐を削除（多条件 simulate ループから到達不能な dead code だった）。`_ILLUMINATION_PRESETS` / `_RGB_LUMINANCE_WEIGHTS` 定数を除去。config の `sparkle.illumination` セクションは読み込み時に silently 無視される（後方互換） | — |
 | 代表波長で規格準拠 Haze/Gloss/DOI | `metrics.representative_wavelength_um`（デフォルト 0.555 μm, V(λ) ピーク）を追加。Haze/Gloss/DOI は `wavelength_um` list の影響を受けず代表波長 1 条件でのみ計算され、列は `haze_fft`/`gloss_fft`/`doi_fft` に固定（波長サフィックス無し）。代表波長が list に含まれない場合は追加 1 条件 sim を実行、含まれる場合は再利用。Sparkle/Log-RMSE は従来通り波長ごと。spec Section 5.3「規格対応と波長依存性」を追加。テスト 269→273件 | — |
+| `bsdf dashboard` CLI + 多モデル対応 DynamicMap | 新 CLI サブコマンド `bsdf dashboard --config file.yaml --port 5006` でリアルタイムブラウザダッシュボードを起動。config.surface.model を判定して `RandomRoughDynamicMap` / `SphericalArrayDynamicMap` / `MeasuredSurfaceDynamicMap` のいずれかを起動（`create_dashboard_from_config()` ファクトリ）。`measured_bsdf.path` 指定時は `select_block()` で条件一致の実測ブロックを 1D プロファイルに黒点 Scatter で自動オーバーレイ。SphericalArraySurface は radius/pitch/placement/overlap_mode のスライダー＆セレクタ UI を追加、MeasuredSurface 系は固定表示。テスト 273→286件 | — |

@@ -741,6 +741,41 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
 
 # ── visualize ─────────────────────────────────────────────────────────────────
 
+# ── dashboard ─────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--config", "-c", required=True, type=click.Path(exists=True), help="設定ファイルパス（YAML）")
+@click.option("--port", "-p", default=5006, show_default=True, type=int, help="Panel サーバーポート")
+@click.option("--preview-grid", default=512, show_default=True, type=int,
+              help="プレビュー計算のグリッドサイズ（大きいほど精細・遅い）")
+@click.option("--no-browser", is_flag=True, default=False,
+              help="起動時にブラウザを自動で開かない")
+def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> None:
+    """リアルタイム BSDF ダッシュボードをローカルサーバーで起動する。
+
+    config.yaml の `surface.model` に応じて以下のダッシュボードが起動する：
+    - RandomRoughSurface: rq_um / lc_um / fractal_dim スライダー
+    - SphericalArraySurface: radius / pitch / placement / overlap_mode
+    - MeasuredSurface 系（DeviceVk6Surface 等）: 固定表示
+
+    `measured_bsdf.path` が config に指定されていれば、条件一致する
+    実測ブロックを 1D プロファイルに黒点 Scatter で自動オーバーレイする。
+    """
+    from ..visualization.dynamicmap import create_dashboard_from_config
+
+    logger.info(f"設定ファイル読み込み: {config}")
+    dash = create_dashboard_from_config(
+        config_path=config, preview_grid_size_idle=preview_grid,
+    )
+    logger.info(
+        f"ダッシュボード起動: http://localhost:{port}  "
+        f"(Ctrl+C で停止)"
+    )
+    dash.serve(port=port, show=(not no_browser))
+
+
+# ── visualize ─────────────────────────────────────────────────────────────────
+
 @cli.command()
 @click.option("--run-id", required=True, help="MLflow の run_id")
 @click.option("--tracking-uri", default="mlruns", show_default=True, help="MLflow トラッキング URI")
