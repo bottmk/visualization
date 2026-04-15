@@ -376,8 +376,8 @@ mlflow:
 MLflow UIの起動：
 
 ```bash
-mlflow ui --backend-store-uri mlruns
-# ブラウザで http://localhost:5000 を開く
+mlflow ui --backend-store-uri mlruns # ブラウザで http://localhost:5000 を開く
+uv run mlflow server --backend-store-uri mlruns --host 0.0.0.0 --port 5000 # 他PCに公開
 ```
 
 ---
