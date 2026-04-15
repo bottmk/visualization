@@ -92,7 +92,6 @@ class TestPresetResolution:
                     "enabled": True,
                     "viewing": {"preset": preset_name},
                     "display": {"preset": "fhd_smartphone"},
-                    "illumination": {"preset": "green"},
                 }
             },
         }
@@ -108,10 +107,22 @@ class TestPresetResolution:
         sparkle = cfg.metrics["sparkle"]
         assert sparkle["viewing"]["distance_mm"] == pytest.approx(350.0)
 
-    def test_green_illumination_wavelength(self):
-        cfg = self._make_cfg_with_sparkle("smartphone")
+    def test_illumination_preset_is_ignored(self):
+        """illumination は simulate ループで使われないため resolved から削除される。"""
+        raw = {
+            **_MINIMAL_CFG,
+            "metrics": {
+                "sparkle": {
+                    "enabled": True,
+                    "viewing": {"preset": "smartphone"},
+                    "display": {"preset": "fhd_smartphone"},
+                    "illumination": {"preset": "green"},  # 指定しても無視される
+                }
+            },
+        }
+        cfg = BSDFConfig(raw)
         sparkle = cfg.metrics["sparkle"]
-        assert sparkle["illumination"]["wavelengths_um"] == [0.55]
+        assert "illumination" not in sparkle
 
     def test_unknown_preset_raises(self):
         raw = {
@@ -120,7 +131,6 @@ class TestPresetResolution:
                 "sparkle": {
                     "viewing": {"preset": "unknown_device"},
                     "display": {"preset": "fhd_smartphone"},
-                    "illumination": {"preset": "green"},
                 }
             },
         }
@@ -135,7 +145,6 @@ class TestPresetResolution:
                 "sparkle": {
                     "viewing": {"preset": "smartphone", "distance_mm": 500.0},
                     "display": {"preset": "fhd_smartphone"},
-                    "illumination": {"preset": "green"},
                 }
             },
         }

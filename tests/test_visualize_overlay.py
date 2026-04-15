@@ -272,9 +272,8 @@ class TestSparkleMultiWavelength:
             "metrics": {
                 "sparkle": {
                     "enabled": True,
-                    "viewing":      {"preset": "smartphone"},
-                    "display":      {"preset": "fhd_smartphone"},
-                    "illumination": {"preset": "green"},
+                    "viewing": {"preset": "smartphone"},
+                    "display": {"preset": "fhd_smartphone"},
                 },
                 "haze":  {"enabled": False},
                 "gloss": {"enabled": False},

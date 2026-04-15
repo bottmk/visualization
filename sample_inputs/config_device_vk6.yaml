@@ -66,4 +66,5 @@ metrics:
     enabled: false
   sparkle:
     enabled: false
-    # 多波長時は波長ごとに計算・記録される（sparkle_r_fft_wl465nm_aoi0_brdf 等）
+    # 多波長時は波長ごとに独立に計算・記録される
+    # (例: sparkle_fft_wl465nm_aoi0_brdf / sparkle_fft_wl525nm_aoi0_brdf)

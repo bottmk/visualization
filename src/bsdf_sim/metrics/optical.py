@@ -185,15 +185,6 @@ _DISPLAY_PRESETS = {
     "4k_monitor":     {"pixel_pitch_mm": 0.160, "subpixel_layout": "rgb_stripe"},
 }
 
-_ILLUMINATION_PRESETS = {
-    "green": {"wavelengths_um": [0.55]},
-    "rgb":   {"wavelengths_um": [0.45, 0.55, 0.65]},
-}
-
-# RGB 輝度加重（CIE 1931）
-_RGB_LUMINANCE_WEIGHTS = [0.0722, 0.7152, 0.2126]  # B, G, R
-
-
 def _compute_sparkle_single(
     u_grid: np.ndarray,
     v_grid: np.ndarray,
@@ -242,33 +233,29 @@ def compute_sparkle(
     v_grid: np.ndarray,
     bsdf: np.ndarray,
     sparkle_config: dict,
-    bsdf_per_wavelength: list[np.ndarray] | None = None,
 ) -> float:
     """ギラツキコントラスト Cs = σ/μ を計算する。
 
     ディスプレイ画素ごとにBSDFを積分し、輝度のばらつき（σ/μ）を計算する。
-    RGB照明モード（wavelengths_um に3波長を指定）の場合は CIE 1931 輝度加重平均を行う。
+    multi-wavelength な比較は simulate() 側の条件ループで波長ごとに独立に
+    計算される（波長サフィックス `sparkle_fft_wl525nm_aoi0_brdf` 等で記録）。
 
     Args:
         u_grid: 方向余弦 u グリッド（2D）
         v_grid: 方向余弦 v グリッド（2D）
-        bsdf: BSDF 値 [sr⁻¹]（2D）— 単波長モードで使用
-        sparkle_config: 設定辞書（config.yaml の metrics.sparkle セクション）
-        bsdf_per_wavelength: 複数波長のBSDFリスト（波長順、wavelengths_um と対応）。
-            指定時は CIE 輝度加重でスパークルを合成する。
+        bsdf: BSDF 値 [sr⁻¹]（2D、1 波長分）
+        sparkle_config: 設定辞書（config.yaml の metrics.sparkle セクション。
+            viewing と display のプリセットのみ参照。illumination は読まない）
 
     Returns:
         ギラツキコントラスト Cs = σ/μ
     """
-    # 設定の解決
     viewing = sparkle_config.get("viewing", {})
     display = sparkle_config.get("display", {})
-    illumination = sparkle_config.get("illumination", {})
 
     distance_mm = float(viewing.get("distance_mm", 300.0))
     pupil_mm = float(viewing.get("pupil_diameter_mm", 3.0))
     pixel_pitch_mm = float(display.get("pixel_pitch_mm", 0.062))
-    wavelengths_um = list(illumination.get("wavelengths_um", [0.55]))
 
     # 瞳孔の立体角 [sr]
     omega_pupil = np.pi * (pupil_mm / 2 / distance_mm) ** 2
@@ -276,30 +263,9 @@ def compute_sparkle(
     # 1画素の UV 空間での半角
     sin_half = np.sin(np.arctan(pixel_pitch_mm / 2 / distance_mm))
 
-    # 複数波長モード（CIE 輝度加重平均）
-    if bsdf_per_wavelength is not None and len(bsdf_per_wavelength) == len(wavelengths_um) > 1:
-        # 波長に対応する CIE 輝度感度（標準値: 450/550/650nm ≒ B/G/R）
-        cie_weights = np.array(_RGB_LUMINANCE_WEIGHTS[: len(wavelengths_um)], dtype=np.float64)
-        cie_weights = cie_weights / cie_weights.sum()  # 正規化
-
-        # 各波長の画素輝度配列を加重合成（最短に合わせてトリム）
-        all_arrs = [
-            _compute_sparkle_single(u_grid, v_grid, bsdf_w, omega_pupil, sin_half)
-            for bsdf_w in bsdf_per_wavelength
-        ]
-        n_pixels = min(len(a) for a in all_arrs)
-        if n_pixels < 2:
-            return 0.0
-        combined = sum(
-            w * a[:n_pixels]
-            for w, a in zip(cie_weights, all_arrs)
-        )
-        arr = np.asarray(combined)
-    else:
-        # 単波長モード
-        arr = _compute_sparkle_single(u_grid, v_grid, bsdf, omega_pupil, sin_half)
-        if len(arr) < 2:
-            return 0.0
+    arr = _compute_sparkle_single(u_grid, v_grid, bsdf, omega_pupil, sin_half)
+    if len(arr) < 2:
+        return 0.0
 
     mu = float(np.mean(arr))
     if mu < 1e-30:

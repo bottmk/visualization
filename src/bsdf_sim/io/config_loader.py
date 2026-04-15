@@ -32,11 +32,6 @@ _DISPLAY_PRESETS: dict[str, dict[str, Any]] = {
     "4k_monitor":     {"pixel_pitch_mm": 0.160, "subpixel_layout": "rgb_stripe"},
 }
 
-_ILLUMINATION_PRESETS: dict[str, dict[str, list[float]]] = {
-    "green": {"wavelengths_um": [0.55]},
-    "rgb":   {"wavelengths_um": [0.45, 0.55, 0.65]},
-}
-
 _ADDING_DOUBLING_PRESETS: dict[str, dict[str, int]] = {
     "fast":     {"n_theta": 32,  "m_phi": 8},
     "standard": {"n_theta": 128, "m_phi": 18},
@@ -139,10 +134,10 @@ class BSDFConfig:
                 if display := sparkle.get("display"):
                     resolved_sparkle["display"] = _resolve_preset(display, _DISPLAY_PRESETS)
 
-                if illumination := sparkle.get("illumination"):
-                    resolved_sparkle["illumination"] = _resolve_preset(
-                        illumination, _ILLUMINATION_PRESETS
-                    )
+                # illumination プリセットは simulate ループが波長ごとに独立に
+                # 計算するため使われない。指定されていても無視する（後方互換のため
+                # resolved_sparkle から削除）。
+                resolved_sparkle.pop("illumination", None)
 
                 self._resolved.setdefault("metrics", {})["sparkle"] = resolved_sparkle
 

@@ -80,9 +80,8 @@ metrics:
       preset: 'fhd_smartphone'  # 'fhd_smartphone' / 'qhd_monitor' / '4k_monitor' / 'custom'
       pixel_pitch_mm: null      # null のときはプリセット値（0.062mm）
       subpixel_layout: null     # null のときはプリセット値（'rgb_stripe'）
-    illumination:
-      preset: 'green'           # 'green' / 'rgb' / 'custom'
-      wavelengths_um: null      # null のときはプリセット値（[0.55]）
+    # 多波長は simulation.wavelength_um を list で指定する（波長ごとに独立計算）。
+    # 各条件の Sparkle は sparkle_fft_wl525nm_aoi0_brdf のようにサフィックス付きで記録される。
 
 # ── Optuna 最適化 ─────────────────────────────────────────────────────────────
 optuna:
