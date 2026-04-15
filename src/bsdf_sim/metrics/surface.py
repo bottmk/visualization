@@ -408,8 +408,15 @@ def compute_rc(hm: HeightMap) -> float:
 # 統合計算関数
 # ─────────────────────────────────────────────────────────────────────────────
 
-def compute_all_surface_metrics(hm: HeightMap) -> dict[str, float]:
+def compute_all_surface_metrics(
+    hm: HeightMap,
+    verbose: bool = False,
+) -> dict[str, float]:
     """全 JIS/ISO 表面形状指標を一括計算する。
+
+    Args:
+        hm: 高さマップ
+        verbose: True のとき tqdm プログレスバーを表示する
 
     Returns:
         指標名と値の辞書。キーの接尾辞: _um=μm, _pct=%, _rad=rad, 無次元は省略。
@@ -429,27 +436,36 @@ def compute_all_surface_metrics(hm: HeightMap) -> dict[str, float]:
         Rsm                 ← 間隔
         Rc                  ← 要素高さ
     """
-    return {
+    steps: list[tuple[str, object]] = [
         # ── ISO 25178-2 S-パラメータ ──────────────────────────────────────────
-        "sq_um":   compute_sq(hm),
-        "sa_um":   compute_sa(hm),
-        "sp_um":   compute_sp(hm),
-        "sv_um":   compute_sv(hm),
-        "sz_um":   compute_sz(hm),
-        "ssk":     compute_ssk(hm),
-        "sku":     compute_sku(hm),
-        "sdq_rad": compute_sdq(hm),
-        "sdr_pct": compute_sdr(hm),
-        "sal_um":  compute_sal(hm),
-        "str":     compute_str(hm),
+        ("sq_um",   compute_sq),
+        ("sa_um",   compute_sa),
+        ("sp_um",   compute_sp),
+        ("sv_um",   compute_sv),
+        ("sz_um",   compute_sz),
+        ("ssk",     compute_ssk),
+        ("sku",     compute_sku),
+        ("sdq_rad", compute_sdq),
+        ("sdr_pct", compute_sdr),
+        ("sal_um",  compute_sal),
+        ("str",     compute_str),
         # ── JIS B 0601 / ISO 4287 R-パラメータ ───────────────────────────────
-        "rq_um":   compute_rq(hm),
-        "ra_um":   compute_ra(hm),
-        "rz_um":   compute_rz(hm),
-        "rp_um":   compute_rp(hm),
-        "rv_um":   compute_rv(hm),
-        "rsk":     compute_rsk(hm),
-        "rku":     compute_rku(hm),
-        "rsm_um":  compute_rsm(hm),
-        "rc_um":   compute_rc(hm),
-    }
+        ("rq_um",   compute_rq),
+        ("ra_um",   compute_ra),
+        ("rz_um",   compute_rz),
+        ("rp_um",   compute_rp),
+        ("rv_um",   compute_rv),
+        ("rsk",     compute_rsk),
+        ("rku",     compute_rku),
+        ("rsm_um",  compute_rsm),
+        ("rc_um",   compute_rc),
+    ]
+
+    if verbose:
+        try:
+            from tqdm import tqdm
+            steps = tqdm(steps, desc="  表面形状指標", unit="指標", leave=False)
+        except ImportError:
+            pass
+
+    return {key: fn(hm) for key, fn in steps}

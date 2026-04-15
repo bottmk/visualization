@@ -19,6 +19,7 @@ dependencies = [
     "pyarrow>=14.0",
     "pyyaml>=6.0",
     "click>=8.0",
+    "tqdm>=4.60",
 ]
 
 [project.optional-dependencies]

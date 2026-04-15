@@ -12,6 +12,8 @@ import logging
 import sys
 from pathlib import Path
 
+import time
+
 import click
 import numpy as np
 
@@ -19,6 +21,11 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
+
+
+def _elapsed(t0: float) -> str:
+    """経過時間を秒単位の文字列で返す。"""
+    return f"{time.perf_counter() - t0:.2f}s"
 logger = logging.getLogger(__name__)
 
 
@@ -58,15 +65,20 @@ def simulate(
     logger.info(f"設定ファイル読み込み完了: {config}")
     logger.info(f"表面モデル: {cfg.surface.get('model')}")
 
-    # 表面形状モデルの生成
+    # [1] 表面形状モデルの生成
+    t0 = time.perf_counter()
+    logger.info(f"[1/4] 高さマップ生成中... (grid={cfg.surface.get('grid_size', 4096)})")
     model = create_model_from_config(cfg._resolved)
     hm = model.get_height_map()
-    logger.info(f"高さマップ生成完了: {hm.grid_size}×{hm.grid_size}, pixel={hm.pixel_size_um}μm")
+    logger.info(f"      完了 ({_elapsed(t0)})  {hm.grid_size}×{hm.grid_size}, pixel={hm.pixel_size_um}μm")
 
-    # 表面形状指標
-    surface_metrics = compute_all_surface_metrics(hm)
+    # [2] 表面形状指標
+    t0 = time.perf_counter()
+    logger.info("[2/4] 表面形状指標計算中...")
+    surface_metrics = compute_all_surface_metrics(hm, verbose=True)
+    logger.info(f"      完了 ({_elapsed(t0)})")
     for k, v in surface_metrics.items():
-        logger.info(f"  {k} = {v:.6f}")
+        logger.info(f"        {k} = {v:.6f}")
 
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -79,9 +91,14 @@ def simulate(
     v_primary: np.ndarray | None = None
     bsdf_primary: np.ndarray | None = None
 
+    # [3] BSDF 計算
+    step3_label = {"fft": "FFT", "psd": "PSD", "both": "FFT + PSD"}[method]
+    logger.info(f"[3/4] {step3_label} 計算中...")
+
     # FFT 計算
     if method in ("fft", "both"):
-        logger.info("FFT 法で計算中...")
+        t0 = time.perf_counter()
+        logger.info("      FFT 法...")
         u, v, bsdf_fft = compute_bsdf_fft(
             height_map=hm,
             wavelength_um=cfg.wavelength_um,
@@ -99,11 +116,12 @@ def simulate(
             is_btdf=cfg.is_btdf,
         )
         all_dfs.append(df_fft)
-        logger.info("FFT 計算完了。")
+        logger.info(f"      FFT 完了 ({_elapsed(t0)})")
 
     # PSD 計算
     if method in ("psd", "both"):
-        logger.info(f"PSD 法で計算中（approx_mode={approx_mode}）...")
+        t0 = time.perf_counter()
+        logger.info(f"      PSD 法 (approx_mode={approx_mode})...")
         u, v, bsdf_psd = compute_bsdf_psd(
             height_map=hm,
             wavelength_um=cfg.wavelength_um,
@@ -123,7 +141,7 @@ def simulate(
             is_btdf=cfg.is_btdf,
         )
         all_dfs.append(df_psd)
-        logger.info("PSD 計算完了。")
+        logger.info(f"      PSD 完了 ({_elapsed(t0)})")
 
     # Adding-Doubling 多層合成（config で enabled: true の場合のみ）
     if cfg.adding_doubling.get("enabled", False) and bsdf_primary is not None:
@@ -159,6 +177,13 @@ def simulate(
         import pandas as pd
         df_combined = pd.concat(all_dfs, ignore_index=True)
 
+        # [4] 光学指標
+        enabled_metrics = [
+            k for k in ("haze", "gloss", "doi", "sparkle")
+            if cfg.metrics.get(k) is not None and cfg.metrics[k].get("enabled", True)
+        ]
+        logger.info(f"[4/4] 光学指標計算中... ({', '.join(enabled_metrics) or 'なし'})")
+        t0 = time.perf_counter()
         optical_metrics = compute_all_optical_metrics(
             u_grid=u_primary,
             v_grid=v_primary,
@@ -166,9 +191,9 @@ def simulate(
             config=cfg.metrics,
             bsdf_floor=cfg.bsdf_floor,
         )
-        logger.info("光学指標:")
+        logger.info(f"      完了 ({_elapsed(t0)})")
         for k, val in optical_metrics.items():
-            logger.info(f"  {k} = {val:.6f}")
+            logger.info(f"        {k} = {val:.6f}")
 
         # Parquet 保存
         if save_parquet:

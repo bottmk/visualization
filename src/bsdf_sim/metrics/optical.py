@@ -200,32 +200,41 @@ def _compute_sparkle_single(
     bsdf: np.ndarray,
     omega_pupil: float,
     sin_half: float,
-) -> list[float]:
-    """1種類のBSDFグリッドについて全画素の輝度リストを計算する（内部用）。"""
+) -> np.ndarray:
+    """1種類のBSDFグリッドについて全画素の輝度配列を計算する（内部用）。
+
+    ベクトル化実装: 各グリッド点を最近傍画素に割り当て、np.bincount で一括積算する。
+    計算量 O(N²) — ループ版の O((1/sin_half)² × N²) より大幅に高速。
+
+    典型例: smartphone プリセット（sin_half≈0.0001）でループ版は 3.7億回だが、
+    本実装は grid_size² 回（512²=26万回）のみ。
+    """
     uv_r2 = u_grid**2 + v_grid**2
     valid = uv_r2 <= 1.0
     du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
     dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
+    cos_s = np.sqrt(np.maximum(1.0 - uv_r2, 0.0))
 
-    n_pix_u = max(1, int(1.0 / sin_half))
-    luminances: list[float] = []
+    # 各グリッド点を最近傍画素インデックスに割り当て（丸め）
+    pix_u = np.round(u_grid / (2.0 * sin_half)).astype(np.int32)
+    pix_v = np.round(v_grid / (2.0 * sin_half)).astype(np.int32)
 
-    for pu in range(-n_pix_u, n_pix_u + 1):
-        for pv in range(-n_pix_u, n_pix_u + 1):
-            u_center = pu * 2 * sin_half
-            v_center = pv * 2 * sin_half
-            pix_mask = (
-                valid
-                & (np.abs(u_grid - u_center) <= sin_half)
-                & (np.abs(v_grid - v_center) <= sin_half)
-            )
-            if not np.any(pix_mask):
-                continue
-            cos_s = np.sqrt(np.maximum(1.0 - uv_r2[pix_mask], 0.0))
-            lum = float(np.sum(bsdf[pix_mask] * cos_s) * du * dv * omega_pupil)
-            luminances.append(lum)
+    pu_flat = pix_u[valid]
+    pv_flat = pix_v[valid]
+    power_flat = (bsdf * cos_s * du * dv * omega_pupil)[valid]
 
-    return luminances
+    if len(power_flat) < 2:
+        return np.array([], dtype=np.float64)
+
+    # 2D 画素インデックス → 1D キー（負インデックスをオフセットで非負化）
+    offset_u = int(pu_flat.min())
+    offset_v = int(pv_flat.min())
+    n_cols = int(pv_flat.max()) - offset_v + 1
+    pixel_key = (pu_flat - offset_u) * n_cols + (pv_flat - offset_v)
+
+    # 同一画素に属するグリッド点の輝度を合算（np.unique で連続インデックスに圧縮）
+    _, inverse = np.unique(pixel_key, return_inverse=True)
+    return np.bincount(inverse, weights=power_flat)
 
 
 def compute_sparkle(
@@ -273,25 +282,24 @@ def compute_sparkle(
         cie_weights = np.array(_RGB_LUMINANCE_WEIGHTS[: len(wavelengths_um)], dtype=np.float64)
         cie_weights = cie_weights / cie_weights.sum()  # 正規化
 
-        # 各波長の画素輝度リストを加重合成
-        all_luminances_list = [
+        # 各波長の画素輝度配列を加重合成（最短に合わせてトリム）
+        all_arrs = [
             _compute_sparkle_single(u_grid, v_grid, bsdf_w, omega_pupil, sin_half)
             for bsdf_w in bsdf_per_wavelength
         ]
-        n_pixels = min(len(lst) for lst in all_luminances_list)
+        n_pixels = min(len(a) for a in all_arrs)
         if n_pixels < 2:
             return 0.0
         combined = sum(
-            w * np.array(lst[:n_pixels])
-            for w, lst in zip(cie_weights, all_luminances_list)
+            w * a[:n_pixels]
+            for w, a in zip(cie_weights, all_arrs)
         )
         arr = np.asarray(combined)
     else:
         # 単波長モード
-        luminances = _compute_sparkle_single(u_grid, v_grid, bsdf, omega_pupil, sin_half)
-        if len(luminances) < 2:
+        arr = _compute_sparkle_single(u_grid, v_grid, bsdf, omega_pupil, sin_half)
+        if len(arr) < 2:
             return 0.0
-        arr = np.array(luminances)
 
     mu = float(np.mean(arr))
     if mu < 1e-30:
@@ -327,19 +335,29 @@ def compute_all_optical_metrics(
     cfg = config or {}
     results: dict[str, float] = {}
 
-    if cfg.get("haze", {}).get("enabled", True):
-        half_angle = cfg.get("haze", {}).get("half_angle_deg", 2.5)
-        results["haze"] = compute_haze(u_grid, v_grid, bsdf, half_angle)
+    # 判定ルール: セクション自体が存在しない場合は実行しない（コメントアウト対応）。
+    # セクションが存在する場合は enabled のデフォルトを True とする。
+    haze_cfg = cfg.get("haze")
+    if haze_cfg is not None and haze_cfg.get("enabled", True):
+        results["haze"] = compute_haze(
+            u_grid, v_grid, bsdf,
+            half_angle_deg=haze_cfg.get("half_angle_deg", 2.5),
+        )
 
-    if cfg.get("gloss", {}).get("enabled", True):
-        angle = cfg.get("gloss", {}).get("angle_deg", 60.0)
-        results["gloss"] = compute_gloss(u_grid, v_grid, bsdf, angle)
+    gloss_cfg = cfg.get("gloss")
+    if gloss_cfg is not None and gloss_cfg.get("enabled", True):
+        results["gloss"] = compute_gloss(
+            u_grid, v_grid, bsdf,
+            gloss_angle_deg=gloss_cfg.get("angle_deg", 60.0),
+        )
 
-    if cfg.get("doi", {}).get("enabled", True):
+    doi_cfg = cfg.get("doi")
+    if doi_cfg is not None and doi_cfg.get("enabled", True):
         results["doi"] = compute_doi(u_grid, v_grid, bsdf)
 
-    if cfg.get("sparkle", {}).get("enabled", True):
-        results["sparkle"] = compute_sparkle(u_grid, v_grid, bsdf, cfg.get("sparkle", {}))
+    sparkle_cfg = cfg.get("sparkle")
+    if sparkle_cfg is not None and sparkle_cfg.get("enabled", True):
+        results["sparkle"] = compute_sparkle(u_grid, v_grid, bsdf, sparkle_cfg)
 
     if simulated is not None and measured is not None:
         results["log_rmse"] = compute_log_rmse(simulated, measured, bsdf_floor)
