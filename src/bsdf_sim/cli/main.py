@@ -463,12 +463,12 @@ def simulate(
                 }
             all_metrics = {**surface_metrics, **all_optical_metrics}
 
-            # PNG を一時ディレクトリで生成してから MLflow にアップロード
+            # PNG / HTML を一時ディレクトリで生成してから MLflow にアップロード
             with _tmpmod.TemporaryDirectory() as _tmpdir:
                 _td = Path(_tmpdir)
                 _plot_paths = []
 
-                # 表面形状 PNG
+                # 表面形状 PNG（MLflow UI でインライン表示）
                 _sq_nm = surface_metrics.get("sq_um", 0.0) * 1000
                 _sa_nm = surface_metrics.get("sa_um", 0.0) * 1000
                 _surf_title = f"{model_name}  Sq={_sq_nm:.2f}nm  Sa={_sa_nm:.2f}nm"
@@ -492,6 +492,37 @@ def simulate(
                         _bsdf_png = _td / f"bsdf_2d_{_mkey}{_cond_tag}.png"
                         save_bsdf_2d_png(_u, _v, _b, _bsdf_png, method=_mkey.upper())
                         _plot_paths.append(_bsdf_png)
+
+                # インタラクティブ HTML（MLflow の artifact をクリック→新タブで動作）
+                try:
+                    from ..visualization.holoviews_plots import (
+                        plot_bsdf_report,
+                        plot_heightmap,
+                        save_html,
+                    )
+
+                    # surface.html — 2D カラーマップ + ヒストグラム + 断面プロファイル
+                    _surf_html = _td / "surface.html"
+                    _surf_layout = plot_heightmap(
+                        hm, title=_surf_title, unit="nm",
+                    )
+                    save_html(_surf_layout, _surf_html)
+                    _plot_paths.append(_surf_html)
+
+                    # bsdf_report.html — 多条件時は Tabs、実測行があれば自動オーバーレイ
+                    _report_html = _td / "bsdf_report.html"
+                    _report_layout = plot_bsdf_report(
+                        df_combined,
+                        metrics=all_metrics,
+                        scale="log",
+                        title=f"BSDF Report — {model_name}",
+                    )
+                    save_html(_report_layout, _report_html)
+                    _plot_paths.append(_report_html)
+                except Exception as _html_err:
+                    logger.warning(
+                        f"インタラクティブ HTML の生成に失敗（PNG のみ記録）: {_html_err}"
+                    )
 
                 run_id = ml_logger.log_trial(
                     params, all_metrics, df_combined, plot_paths=_plot_paths

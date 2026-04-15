@@ -448,3 +448,53 @@ class TestCLIMeasuredBsdfReal:
             ["wavelength_um", "theta_i_deg", "mode"]
         ].drop_duplicates()
         assert len(unique) == 24
+
+
+class TestCLISimulateMLflowArtifacts:
+    """`simulate --log-to-mlflow` が HTML インタラクティブレポートも artifacts に記録する。"""
+
+    def test_simulate_logs_html_artifacts(self, tmp_path):
+        """--log-to-mlflow 指定時に surface.html / bsdf_report.html が生成される。"""
+        import mlflow
+        from bsdf_sim.optimization.mlflow_logger import (
+            EXPERIMENT_RAW_DATA,
+            _get_or_create_experiment,
+        )
+
+        tracking_uri = str(tmp_path / "mlruns")
+        cfg = {
+            **_MINIMAL_CONFIG,
+            "mlflow": {
+                "tracking_uri": tracking_uri,
+                "experiment_name": EXPERIMENT_RAW_DATA,
+            },
+        }
+        config_path = tmp_path / "config_mlflow.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "simulate",
+            "--config", str(config_path),
+            "--output-dir", str(tmp_path / "out"),
+            "--method", "fft",
+            "--log-to-mlflow",
+        ])
+        assert result.exit_code == 0, result.output
+
+        # MLflow の artifacts ツリーを走査し HTML が 2 つ含まれていることを確認
+        mlflow.set_tracking_uri(tracking_uri)
+        client = mlflow.tracking.MlflowClient()
+        exp = client.get_experiment_by_name(EXPERIMENT_RAW_DATA)
+        assert exp is not None
+        runs = client.search_runs(exp.experiment_id, max_results=5)
+        assert len(runs) >= 1
+        run = runs[0]
+
+        artifacts = client.list_artifacts(run.info.run_id, path="plots")
+        names = {a.path.rsplit("/", 1)[-1] for a in artifacts}
+        assert "surface.png" in names
+        assert "surface.html" in names
+        assert "bsdf_report.html" in names
+        # 少なくとも 1 つの 2D BSDF PNG
+        assert any(n.startswith("bsdf_2d_") and n.endswith(".png") for n in names)

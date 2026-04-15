@@ -785,6 +785,7 @@ panel==1.4.2
 | `TestDashboardCLI::test_dashboard_command_in_help` | `bsdf --help` に dashboard が表示 |
 | `TestDashboardCLI::test_dashboard_subcommand_help` | `bsdf dashboard --help` に `--config` / `--port` |
 | `TestDashboardCLI::test_dashboard_missing_config_fails` | 存在しない config で exit_code ≠ 0 |
+| `TestCLISimulateMLflowArtifacts::test_simulate_logs_html_artifacts` | `--log-to-mlflow` 実行後、artifacts/plots/ に surface.png / surface.html / bsdf_report.html / bsdf_2d_*.png が保存される |
 
 ---
 
@@ -993,3 +994,4 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | Sparkle illumination 削除 | `compute_sparkle` の `bsdf_per_wavelength` 引数と CIE 輝度加重分岐を削除（多条件 simulate ループから到達不能な dead code だった）。`_ILLUMINATION_PRESETS` / `_RGB_LUMINANCE_WEIGHTS` 定数を除去。config の `sparkle.illumination` セクションは読み込み時に silently 無視される（後方互換） | — |
 | 代表波長で規格準拠 Haze/Gloss/DOI | `metrics.representative_wavelength_um`（デフォルト 0.555 μm, V(λ) ピーク）を追加。Haze/Gloss/DOI は `wavelength_um` list の影響を受けず代表波長 1 条件でのみ計算され、列は `haze_fft`/`gloss_fft`/`doi_fft` に固定（波長サフィックス無し）。代表波長が list に含まれない場合は追加 1 条件 sim を実行、含まれる場合は再利用。Sparkle/Log-RMSE は従来通り波長ごと。spec Section 5.3「規格対応と波長依存性」を追加。テスト 269→273件 | — |
 | `bsdf dashboard` CLI + 多モデル対応 DynamicMap | 新 CLI サブコマンド `bsdf dashboard --config file.yaml --port 5006` でリアルタイムブラウザダッシュボードを起動。config.surface.model を判定して `RandomRoughDynamicMap` / `SphericalArrayDynamicMap` / `MeasuredSurfaceDynamicMap` のいずれかを起動（`create_dashboard_from_config()` ファクトリ）。`measured_bsdf.path` 指定時は `select_block()` で条件一致の実測ブロックを 1D プロファイルに黒点 Scatter で自動オーバーレイ。SphericalArraySurface は radius/pitch/placement/overlap_mode のスライダー＆セレクタ UI を追加、MeasuredSurface 系は固定表示。テスト 273→286件 | — |
+| simulate の MLflow 記録に HTML artifacts 追加 | `bsdf simulate --log-to-mlflow` が `plots/surface.html`（plot_heightmap）と `plots/bsdf_report.html`（plot_bsdf_report・多条件 Tabs・実測オーバーレイ込み）を自動生成して run artifacts に保存。MLflow UI の artifacts タブから HTML をクリックすると新タブで Bokeh インタラクティブ表示される。PNG は従来通りインライン表示可能。HTML 生成失敗時は警告のみで PNG は記録される（graceful degradation）。テスト 286→287件 | — |
