@@ -113,6 +113,38 @@ bsdf optimize [オプション]
 
 ---
 
+### `bsdf surface` — 表面形状の可視化
+
+```
+bsdf surface [オプション]
+
+オプション:
+  -c, --config PATH          設定ファイルパス（YAML）        [必須]
+  -o, --output PATH          出力ファイルパス                [デフォルト: surface.html/png]
+  --format [html|png]        出力形式                        [デフォルト: html]
+  --unit [nm|um]             高さの表示単位                  [デフォルト: nm]
+  --colormap TEXT            カラーマップ名                  [デフォルト: RdYlBu_r]
+```
+
+出力内容（4パネル構成）:
+
+| パネル | 内容 |
+|---|---|
+| 2D カラーマップ | 高さ分布を色で表示（単位: nm または μm） |
+| 高さ分布ヒストグラム | ピクセル高さの頻度分布 |
+| X 断面プロファイル | y=中央での高さプロファイル |
+| Y 断面プロファイル | x=中央での高さプロファイル |
+
+```bash
+# PNG（静止画）で保存
+bsdf surface --config config.yaml --format png --unit nm
+
+# インタラクティブ HTML で保存
+bsdf surface --config config.yaml --format html --output surface.html
+```
+
+---
+
 ### `bsdf visualize` — 結果の可視化
 
 ```
