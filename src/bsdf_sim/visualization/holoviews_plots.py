@@ -145,11 +145,10 @@ def plot_bsdf_2d_heatmap(
         vdims=[label],
     ).opts(
         title=title,
-        width=500,
-        height=500,
+        frame_width=400,
+        frame_height=400,
         colorbar=True,
         cmap="viridis",
-        aspect="equal",
     )
 
     # 半球境界円のオーバーレイ
@@ -160,7 +159,7 @@ def plot_bsdf_2d_heatmap(
         vdims=["v = sin θ_s sin φ_s"],
     ).opts(color="white", line_dash="dashed", line_width=1)
 
-    return (img * boundary).opts(title=title)
+    return (img * boundary).opts(title=title, frame_width=400, frame_height=400)
 
 
 def create_scale_toggle_panel(
