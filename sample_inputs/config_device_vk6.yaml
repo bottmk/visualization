@@ -1,0 +1,34 @@
+# Keyence VK-X シリーズ使用時の config.yaml サンプル
+# bsdf simulate --config sample_inputs/config_device_vk6.yaml -m fft で実行
+
+simulation:
+  wavelength_um: 0.55
+  theta_i_deg: 0.0
+  phi_i_deg: 0.0
+  n1: 1.0
+  n2: 1.5
+  polarization: 'Unpolarized'
+
+surface:
+  model: 'DeviceVk6Surface'     # custom_surfaces/device_vk6.py から自動ロード
+  grid_size: 4096
+  pixel_size_um: 0.25
+  measured:
+    path: 'sample_inputs/device_vk6_sample.csv'
+    # source_pixel_size_um は省略可能（ヘッダの XYキャリブレーション行から自動取得）
+    # source_pixel_size_um: 0.136  # 手動で上書きする場合はここで指定
+    leveling: true
+
+bsdf_floor: 1.0e-6
+
+metrics:
+  haze:
+    enabled: true
+    cone_half_angle_deg: 2.5
+  gloss:
+    enabled: true
+    specular_half_angle_deg: 2.5
+  doi:
+    enabled: false
+  sparkle:
+    enabled: false
