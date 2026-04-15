@@ -369,6 +369,41 @@ def save_heightmap_png(
     plt.close(fig)
 
 
+def _bsdf_1d_to_2d_binned(
+    u_pts: np.ndarray,
+    v_pts: np.ndarray,
+    bsdf_pts: np.ndarray,
+    n_grid: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """1D (u, v, bsdf) 点列を np.bincount でビン集計して 2D グリッドに変換する。
+
+    scipy.griddata を使わず O(N) で完全ベクトル化。大規模点群でも高速。
+    """
+    axis = np.linspace(-1.0, 1.0, n_grid, dtype=np.float32)
+    u_grid, v_grid = np.meshgrid(axis, axis, indexing="ij")
+
+    # 各点を最近傍グリッドセルにマップ
+    u_idx = np.clip(
+        np.round((u_pts.astype(np.float32) + 1.0) * (n_grid - 1) / 2.0).astype(np.int32),
+        0, n_grid - 1,
+    )
+    v_idx = np.clip(
+        np.round((v_pts.astype(np.float32) + 1.0) * (n_grid - 1) / 2.0).astype(np.int32),
+        0, n_grid - 1,
+    )
+
+    flat_idx = u_idx * n_grid + v_idx
+    bsdf_sum = np.bincount(flat_idx, weights=bsdf_pts.astype(np.float64),
+                           minlength=n_grid * n_grid)
+    count    = np.bincount(flat_idx, minlength=n_grid * n_grid).astype(np.float64)
+
+    bsdf_2d = np.where(count > 0, bsdf_sum / np.maximum(count, 1), 0.0)
+    bsdf_2d = bsdf_2d.reshape(n_grid, n_grid).astype(np.float32)
+    bsdf_2d[u_grid ** 2 + v_grid ** 2 > 1.0] = 0.0
+
+    return u_grid, v_grid, bsdf_2d
+
+
 def save_bsdf_2d_png(
     u: np.ndarray,
     v: np.ndarray,
@@ -382,7 +417,8 @@ def save_bsdf_2d_png(
 ) -> None:
     """2D BSDF ヒートマップを PNG ファイルとして保存する（matplotlib 使用）。
 
-    1D/2D 入力どちらにも対応。半球外（u²+v²>1）をマスクして表示。
+    2D 入力（simulate）: 直接ダウンサンプリングで高速処理。
+    1D 入力（scattered）: np.bincount ビン集計で高速処理。
 
     Args:
         u, v: 方向余弦（1D または 2D）
@@ -392,32 +428,30 @@ def save_bsdf_2d_png(
         method: 手法名（タイトルに付加）
         log_scale: True の場合 log10 スケール
         dpi: 解像度
-        n_grid: 再構築グリッドサイズ
+        n_grid: 出力グリッドサイズ
     """
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from scipy.interpolate import griddata
 
-    # 1D に flatten して半球内のみ抽出
-    u_f = u.ravel().astype(np.float64)
-    v_f = v.ravel().astype(np.float64)
-    bsdf_f = bsdf.ravel().astype(np.float64)
-    valid = u_f ** 2 + v_f ** 2 <= 1.0
-    u_f, v_f, bsdf_f = u_f[valid], v_f[valid], bsdf_f[valid]
+    if u.ndim == 2:
+        # simulate から渡された正規 2D グリッド → 直接ダウンサンプリング
+        N = u.shape[0]
+        step = max(1, N // n_grid)
+        bsdf_2d = bsdf[::step, ::step][:n_grid, :n_grid].astype(np.float64)
+        u_ds    = u[::step, ::step][:n_grid, :n_grid]
+        v_ds    = v[::step, ::step][:n_grid, :n_grid]
+        outside = u_ds ** 2 + v_ds ** 2 > 1.0
+        bsdf_2d[outside] = np.nan
+    else:
+        # 1D 散布点 → ビン集計
+        _, _, bsdf_2d_f = _bsdf_1d_to_2d_binned(
+            u.ravel(), v.ravel(), bsdf.ravel(), n_grid
+        )
+        bsdf_2d = bsdf_2d_f.astype(np.float64)
+        bsdf_2d[bsdf_2d == 0.0] = np.nan
 
-    # 正規グリッドに補間
-    axis = np.linspace(-1.0, 1.0, n_grid)
-    u_grid, v_grid = np.meshgrid(axis, axis, indexing="ij")
-    bsdf_2d = griddata(
-        (u_f, v_f), bsdf_f,
-        (u_grid, v_grid),
-        method="linear",
-        fill_value=0.0,
-    )
-    bsdf_2d[u_grid ** 2 + v_grid ** 2 > 1.0] = np.nan
-
-    data = np.log10(np.maximum(bsdf_2d, 1e-10)) if log_scale else bsdf_2d
+    data  = np.log10(np.maximum(bsdf_2d, 1e-10)) if log_scale else bsdf_2d
     label = "log10(BSDF [sr-1])" if log_scale else "BSDF [sr-1]"
 
     fig, ax = plt.subplots(figsize=(5, 5))
@@ -445,7 +479,7 @@ def df_to_2d_grid(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """long-format DataFrame の (u, v, bsdf) から 2D グリッドを再構築する。
 
-    scipy.interpolate.griddata で正規グリッドに補間する。
+    np.bincount ビン集計を使用（scipy 不要・大規模点群でも高速）。
 
     Args:
         df_method: method でフィルタ済みの BSDF DataFrame
@@ -454,24 +488,12 @@ def df_to_2d_grid(
     Returns:
         (u_grid, v_grid, bsdf_2d) — いずれも (n_grid, n_grid) の ndarray
     """
-    from scipy.interpolate import griddata
-
-    u_pts = df_method["u"].values.astype(np.float64)
-    v_pts = df_method["v"].values.astype(np.float64)
-    bsdf_pts = df_method["bsdf"].values.astype(np.float64)
-
-    axis = np.linspace(-1.0, 1.0, n_grid)
-    u_grid, v_grid = np.meshgrid(axis, axis, indexing="ij")
-
-    bsdf_2d = griddata(
-        (u_pts, v_pts), bsdf_pts,
-        (u_grid, v_grid),
-        method="linear",
-        fill_value=0.0,
+    return _bsdf_1d_to_2d_binned(
+        df_method["u"].values,
+        df_method["v"].values,
+        df_method["bsdf"].values,
+        n_grid=n_grid,
     )
-    bsdf_2d[u_grid ** 2 + v_grid ** 2 > 1.0] = 0.0
-
-    return u_grid, v_grid, bsdf_2d.astype(np.float32)
 
 
 def plot_bsdf_report(
