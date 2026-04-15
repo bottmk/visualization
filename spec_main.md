@@ -679,6 +679,22 @@ panel==1.4.2
 | `TestCLIMeasuredBsdfReal::test_simulate_with_measured_bsdf_cli_option` | `--measured-bsdf` で実測読み込み・log_rmse 計算・Parquet に measured 行 |
 | `TestCLIMeasuredBsdfReal::test_simulate_match_measured_auto_conditions` | `match_measured: true` で実測 24 条件を sim に自動採用 |
 
+#### 9.2.11. visualize 実測オーバーレイ・多条件レポート（`tests/test_visualize_overlay.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `TestOverlay1D::test_default_single_condition` | 引数省略で単条件 1D オーバーレイが描画される |
+| `TestOverlay1D::test_auto_select_multi_condition` | 多条件 df でも自動選択で "データなし" にならない |
+| `TestOverlay1D::test_mode_filter_brdf_vs_btdf` | 同じ λ・θ でも BRDF/BTDF を分離して描画 |
+| `TestOverlay1D::test_empty_df_returns_placeholder` | 空 df でプレースホルダを返す |
+| `TestOverlay1D::test_measured_overlay_present` | `method='measured'` 行が Scatter 要素として追加される |
+| `TestBsdfReportMultiCondition::test_multi_condition_uses_tabs` | 多条件 df で `pn.Tabs` が生成される |
+| `TestBsdfReportMultiCondition::test_tab_count_matches_conditions` | Tab 数 = 3λ × 2θ × 2mode = 12 |
+| `TestBsdfReportMultiCondition::test_metrics_table_includes_log_rmse` | `log_rmse_*` メトリクスが Comparison カテゴリで表示 |
+| `TestVisualizeCLI::test_visualize_with_measured_overlay` | simulate → Parquet 読込 → report 生成が HTML を出力 |
+| `TestSparkleMultiWavelength::test_sparkle_multi_wavelength_keys_in_parquet` | 多波長 × Sparkle 有効で 3 波長の BSDF が Parquet に保存 |
+| `TestSparkleMultiWavelength::test_sparkle_metric_suffix_helper` | メトリクスキーのサフィックス生成規則 `_<method>_wl<X>nm_aoi<Y>_<mode>` |
+
 ---
 
 ### 9.3. 物理検証項目
@@ -882,3 +898,4 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | 4 種パディング方式追加 | MeasuredSurface に zeros/tile/reflect/smooth_tile パディングを実装。DeviceVk6Surface の pixel_size_um / grid_size ヘッダ自動算出を実装。テスト 131→172件 | — |
 | BSDF 実測ファイルリーダー（プラグイン方式） | custom_bsdf_readers/ に BaseBsdfFileReader サブクラスを置くだけで自動登録。LightToolsBsdfReader（LightTools/MiniDiff .bsdf）を実装。build_measured_dataframe に is_btdf 引数を追加。テスト 172→213件 | — |
 | 多条件シミュレーション＋実測 BSDF 統合 | 1 run 内で多波長・多入射角・BRDF/BTDF を実行可能に（案 2-B: スカラ/list 両対応）。`simulation.wavelength_um` / `theta_i_deg` / `mode` に list を指定すると直積展開。`measured_bsdf` セクションで実測ファイルを紐づけ、`match_measured: true` で実測条件を sim に自動採用、`--measured-bsdf` CLI オプションで上書き。条件ごとに `merge_sim_and_measured()` が Log-RMSE を自動計算。`select_block` / `get_conditions` ヘルパー追加。テスト 213→255件 | — |
+| visualize 実測オーバーレイ＋多条件対応 | `plot_bsdf_1d_overlay` で条件未指定時に df 先頭を自動選択（多条件 Parquet でも "データなし" にならない）。`mode='BRDF'/'BTDF'` フィルタ追加。`plot_bsdf_report` は多条件時に `pn.Tabs` で条件ごとに 1D+2D+Log-RMSE を切替表示。実測行（`method='measured'`）は 1D に黒点 Scatter で自動オーバーレイ。テスト 255→269件 | — |

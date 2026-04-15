@@ -36,20 +36,24 @@ def _check_holoviews() -> None:
 def plot_bsdf_1d_overlay(
     df: pd.DataFrame,
     phi_s_deg: float = 0.0,
-    theta_i_deg: float = 0.0,
-    wavelength_um: float = 0.55,
+    theta_i_deg: float | None = None,
+    wavelength_um: float | None = None,
+    mode: str | None = None,
     scale: str = "log",
     title: str = "BSDF 比較",
 ) -> Any:
     """FFT/PSD/実測 BSDF の1次元オーバーレイプロットを生成する。
 
     指定した入射面（phi_s = 定数）に沿ったBSDFプロファイルを比較する。
+    `theta_i_deg` / `wavelength_um` / `mode` を省略すると DataFrame 内の
+    先頭条件を自動採用する（多条件 Parquet でも "データなし" にならない）。
 
     Args:
         df: BSDF Parquet DataFrame（long format）
         phi_s_deg: プロットする散乱方位角 [deg]（デフォルト: 0°）
-        theta_i_deg: 入射天頂角 [deg]でフィルタ
-        wavelength_um: 波長 [μm]でフィルタ
+        theta_i_deg: 入射天頂角 [deg]でフィルタ。None → df から自動選択
+        wavelength_um: 波長 [μm]でフィルタ。None → df から自動選択
+        mode: 'BRDF' / 'BTDF' でフィルタ。None → df から自動選択
         scale: 'linear' / 'log'（デフォルト: 'log'）
         title: プロットタイトル
 
@@ -58,12 +62,25 @@ def plot_bsdf_1d_overlay(
     """
     _check_holoviews()
 
+    if df.empty:
+        return hv.Text(0, 0, "データなし")
+
+    # ── 条件が未指定なら df から自動選択 ──
+    if wavelength_um is None:
+        wavelength_um = float(df["wavelength_um"].iloc[0])
+    if theta_i_deg is None:
+        theta_i_deg = float(df["theta_i_deg"].iloc[0])
+    if mode is None and "mode" in df.columns:
+        mode = str(df["mode"].iloc[0])
+
     # 指定条件でフィルタ
     mask = (
         (np.abs(df["theta_i_deg"] - theta_i_deg) < 0.5)
         & (np.abs(df["wavelength_um"] - wavelength_um) < 0.01)
         & (np.abs(df["phi_s_deg"] - phi_s_deg) < 6.0)  # ±5° の許容範囲
     )
+    if mode is not None and "mode" in df.columns:
+        mask = mask & (df["mode"].astype(str) == mode)
     filtered = df[mask].copy()
 
     if filtered.empty:
@@ -499,6 +516,56 @@ def df_to_2d_grid(
     )
 
 
+def _build_condition_panel(
+    df_cond: "pd.DataFrame",
+    scale: str,
+    n_grid: int,
+    wl_um: float,
+    theta_i: float,
+    mode: str,
+    log_rmse_by_method: dict[str, float],
+) -> Any:
+    """1 条件分の 1D オーバーレイ＋2D ヒートマップ Panel を生成する。"""
+    _check_holoviews()
+
+    # 1D オーバーレイ（FFT/PSD/MultiLayer/measured を自動重ね描き）
+    title_1d = f"1D BSDF — λ={wl_um * 1000:.0f}nm, θ_i={theta_i:.0f}°, {mode}"
+    plot_1d = plot_bsdf_1d_overlay(
+        df_cond, wavelength_um=wl_um, theta_i_deg=theta_i, mode=mode,
+        scale=scale, title=title_1d,
+    )
+
+    # 2D ヒートマップ（手法別）
+    method_order = ["FFT", "PSD", "MultiLayer", "measured"]
+    methods_in_df = [m for m in method_order if m in df_cond["method"].unique()]
+
+    heatmap_plots = []
+    for method in methods_in_df:
+        df_m = df_cond[df_cond["method"] == method]
+        if df_m.empty:
+            continue
+        u_g, v_g, bsdf_2d = df_to_2d_grid(df_m, n_grid=n_grid)
+        hm = plot_bsdf_2d_heatmap(
+            u_g, v_g, bsdf_2d,
+            title=f"2D [{method}]",
+            log_scale=(scale == "log"),
+        )
+        heatmap_plots.append(hm)
+
+    components: list[Any] = [plot_1d]
+    if heatmap_plots:
+        components.append(pn.Row(*heatmap_plots))
+
+    # Log-RMSE 表示（計算値 vs 実測）
+    if log_rmse_by_method:
+        rmse_lines = " · ".join(
+            f"**{m}**: log_rmse={v:.3f}" for m, v in log_rmse_by_method.items()
+        )
+        components.append(pn.pane.Markdown(f"**比較誤差**: {rmse_lines}"))
+
+    return pn.Column(*components)
+
+
 def plot_bsdf_report(
     df: "pd.DataFrame",
     metrics: dict[str, float] | None = None,
@@ -508,8 +575,12 @@ def plot_bsdf_report(
 ) -> Any:
     """1D プロファイル・2D ヒートマップ・指標テーブルをまとめた Panel レポートを生成する。
 
+    多条件 Parquet の場合は (wavelength, theta_i, mode) ごとに Panel Tab を生成する。
+    各 Tab 内で FFT/PSD/MultiLayer と実測（`method='measured'`）の 1D 重ね描き、
+    2D ヒートマップ、Log-RMSE が表示される。
+
     Args:
-        df: BSDF Parquet DataFrame（long format）
+        df: BSDF Parquet DataFrame（long format、`method='measured'` 行を含んでよい）
         metrics: MLflow から取得した指標辞書（省略可）
         scale: 'linear' / 'log'
         title: レポートタイトル
@@ -520,33 +591,77 @@ def plot_bsdf_report(
     """
     _check_holoviews()
 
-    # ── 1D オーバーレイ ─────────────────────────────────────────────────────────
-    plot_1d = plot_bsdf_1d_overlay(df, scale=scale, title="1D BSDF Profile")
+    # ── 条件の一覧を抽出 ────────────────────────────────────────────────────────
+    if "mode" not in df.columns:
+        df = df.copy()
+        df["mode"] = "BRDF"
 
-    # ── 2D ヒートマップ（手法別）────────────────────────────────────────────────
-    method_order = ["FFT", "PSD", "MultiLayer", "measured"]
-    methods_in_df = [m for m in method_order if m in df["method"].unique()]
+    conditions = (
+        df[["wavelength_um", "theta_i_deg", "mode"]]
+        .drop_duplicates()
+        .sort_values(["wavelength_um", "theta_i_deg", "mode"])
+        .reset_index(drop=True)
+    )
 
-    heatmap_plots = []
-    for method in methods_in_df:
-        df_m = df[df["method"] == method]
-        u_g, v_g, bsdf_2d = df_to_2d_grid(df_m, n_grid=n_grid)
-        hm = plot_bsdf_2d_heatmap(
-            u_g, v_g, bsdf_2d,
-            title=f"2D BSDF [{method}]",
-            log_scale=(scale == "log"),
-        )
-        heatmap_plots.append(hm)
+    # 条件ごとの Log-RMSE を事前集計
+    log_rmse_map: dict[tuple, dict[str, float]] = {}
+    if "log_rmse" in df.columns:
+        sim_rows = df[df["method"] != "measured"]
+        for (wl, theta, mode_v, method_v), grp in sim_rows.groupby(
+            ["wavelength_um", "theta_i_deg", "mode", "method"], observed=True
+        ):
+            vals = grp["log_rmse"].dropna().unique()
+            if len(vals) == 0:
+                continue
+            rmse = float(vals[0])
+            if np.isnan(rmse):
+                continue
+            log_rmse_map.setdefault((wl, theta, mode_v), {})[str(method_v)] = rmse
+
+    # ── 条件ごとのパネル ───────────────────────────────────────────────────────
+    components: list[Any] = [pn.pane.Markdown(f"## {title}")]
+
+    has_measured = "measured" in df["method"].unique()
+    if has_measured:
+        components.append(pn.pane.Markdown(
+            "✱ 実測データ（`method='measured'`）を 1D プロットに黒点でオーバーレイ表示。"
+        ))
+
+    if len(conditions) <= 1:
+        # 単条件：従来通りフラットに表示
+        if len(conditions) == 1:
+            wl = float(conditions["wavelength_um"].iloc[0])
+            theta_i = float(conditions["theta_i_deg"].iloc[0])
+            mode_v = str(conditions["mode"].iloc[0])
+            rmse_dict = log_rmse_map.get((wl, theta_i, mode_v), {})
+            cond_panel = _build_condition_panel(
+                df, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
+            )
+            components.append(cond_panel)
+    else:
+        # 多条件：Tabs で切替
+        tabs = []
+        for _, row in conditions.iterrows():
+            wl = float(row["wavelength_um"])
+            theta_i = float(row["theta_i_deg"])
+            mode_v = str(row["mode"])
+            cond_mask = (
+                (np.abs(df["wavelength_um"] - wl) < 1e-6)
+                & (np.abs(df["theta_i_deg"] - theta_i) < 1e-6)
+                & (df["mode"].astype(str) == mode_v)
+            )
+            df_cond = df[cond_mask]
+            rmse_dict = log_rmse_map.get((wl, theta_i, mode_v), {})
+            tab_name = (
+                f"λ{int(round(wl * 1000))}nm θ{int(round(theta_i))}° {mode_v}"
+            )
+            cond_panel = _build_condition_panel(
+                df_cond, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
+            )
+            tabs.append((tab_name, cond_panel))
+        components.append(pn.Tabs(*tabs, tabs_location="left"))
 
     # ── 指標テーブル ─────────────────────────────────────────────────────────────
-    components: list[Any] = [
-        pn.pane.Markdown(f"## {title}"),
-        plot_1d,
-    ]
-
-    if heatmap_plots:
-        components.append(pn.Row(*heatmap_plots))
-
     if metrics:
         rows = []
         for k in sorted(metrics.keys()):
@@ -556,6 +671,9 @@ def plot_bsdf_report(
             if suffix:
                 category = f"Optical ({suffix[1:].upper()})"
                 metric_name = k[: -len(suffix)]
+            elif k.startswith("log_rmse"):
+                category = "Comparison"
+                metric_name = k
             else:
                 category = "Surface"
                 metric_name = k
