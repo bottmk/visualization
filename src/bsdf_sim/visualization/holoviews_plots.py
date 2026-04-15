@@ -435,12 +435,16 @@ def save_bsdf_2d_png(
     import matplotlib.pyplot as plt
 
     if u.ndim == 2:
-        # simulate から渡された正規 2D グリッド → 直接ダウンサンプリング
-        N = u.shape[0]
+        # simulate から渡された正規 2D グリッド（fftfreq 順：DC が [0,0]）
+        # fftshift で DC をセンター [N//2, N//2] に移動してからダウンサンプリング
+        u_s    = np.fft.fftshift(u)
+        v_s    = np.fft.fftshift(v)
+        bsdf_s = np.fft.fftshift(bsdf)
+        N = u_s.shape[0]
         step = max(1, N // n_grid)
-        bsdf_2d = bsdf[::step, ::step][:n_grid, :n_grid].astype(np.float64)
-        u_ds    = u[::step, ::step][:n_grid, :n_grid]
-        v_ds    = v[::step, ::step][:n_grid, :n_grid]
+        bsdf_2d = bsdf_s[::step, ::step][:n_grid, :n_grid].astype(np.float64)
+        u_ds    = u_s[::step, ::step][:n_grid, :n_grid]
+        v_ds    = v_s[::step, ::step][:n_grid, :n_grid]
         outside = u_ds ** 2 + v_ds ** 2 > 1.0
         bsdf_2d[outside] = np.nan
     else:
