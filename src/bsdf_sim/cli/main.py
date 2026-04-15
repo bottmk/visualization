@@ -812,8 +812,22 @@ def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> No
 @click.option("--tracking-uri", default="mlruns", show_default=True, help="MLflow トラッキング URI")
 @click.option("--output", "-o", default="report.html", show_default=True, help="出力 HTML パス")
 @click.option("--scale", default="log", type=click.Choice(["linear", "log"]), show_default=True)
-def visualize(run_id: str, tracking_uri: str, output: str, scale: str) -> None:
-    """MLflow の Run から BSDF レポート（1D/2D/指標テーブル）を HTML 出力する。"""
+@click.option("--log-to-mlflow/--no-log-to-mlflow", default=False, show_default=True,
+              help="生成した HTML を元 run の artifacts/plots/ に書き戻す（optimize 後の探索用）")
+def visualize(
+    run_id: str,
+    tracking_uri: str,
+    output: str,
+    scale: str,
+    log_to_mlflow: bool,
+) -> None:
+    """MLflow の Run から BSDF レポート（1D/2D/指標テーブル）を HTML 出力する。
+
+    `--log-to-mlflow` を指定すると、生成した HTML を元 run の
+    `artifacts/plots/` に書き戻す。optimize で多数の run が出たあと、
+    気になる run にだけレポートを追記してブラウザでクリック閲覧する用途。
+    既に同名の artifact があれば上書きされる（MLflow の挙動に準拠）。
+    """
     from ..optimization.mlflow_logger import load_trial_dataframe, load_trial_metrics
     from ..visualization.holoviews_plots import plot_bsdf_report, save_html
 
@@ -835,6 +849,25 @@ def visualize(run_id: str, tracking_uri: str, output: str, scale: str) -> None:
     )
     save_html(plot, output)
     logger.info(f"HTML 保存: {output}")
+
+    if log_to_mlflow:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        mlflow.set_tracking_uri(tracking_uri)
+        client = MlflowClient(tracking_uri=tracking_uri)
+        try:
+            client.log_artifact(run_id, local_path=str(output), artifact_path="plots")
+            html_name = Path(output).name
+            logger.info(
+                f"MLflow 書き戻し完了: run_id={run_id} → artifacts/plots/{html_name}"
+            )
+            logger.info(
+                "  MLflow UI の当該 run の artifacts タブからクリックで閲覧可能。"
+            )
+        except Exception as e:
+            logger.error(f"MLflow への書き戻しに失敗しました: {e}")
+            raise click.ClickException(f"MLflow artifact 書き戻し失敗: {e}")
 
 
 # ── report ────────────────────────────────────────────────────────────────────

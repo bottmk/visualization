@@ -498,3 +498,86 @@ class TestCLISimulateMLflowArtifacts:
         assert "bsdf_report.html" in names
         # 少なくとも 1 つの 2D BSDF PNG
         assert any(n.startswith("bsdf_2d_") and n.endswith(".png") for n in names)
+
+
+class TestCLIVisualizeWriteBack:
+    """`visualize --log-to-mlflow` が生成 HTML を元 run に書き戻す。
+
+    想定シナリオ: optimize が大量 run を生成（HTML なし）→ 気になる run に
+    後から visualize を実行して HTML を追記 → MLflow UI でクリック閲覧。
+    """
+
+    def _make_bare_run(self, tmp_path, tracking_uri: str) -> str:
+        """HTML を含まない run を作成（optimize 相当）。"""
+        import numpy as np
+        from bsdf_sim.io.parquet_schema import build_dataframe
+        from bsdf_sim.optimization.mlflow_logger import RawDataLogger
+
+        n = 17
+        u1 = np.linspace(-0.5, 0.5, n)
+        v1 = np.linspace(-0.5, 0.5, n)
+        u_grid = np.broadcast_to(u1.reshape(-1, 1), (n, n)).copy()
+        v_grid = np.broadcast_to(v1.reshape(1, -1), (n, n)).copy()
+        bsdf = np.full_like(u_grid, 0.01, dtype=np.float32)
+        df = build_dataframe(
+            u_grid, v_grid, bsdf, "FFT",
+            theta_i_deg=0.0, phi_i_deg=0.0,
+            wavelength_um=0.55, polarization="Unpolarized",
+            is_btdf=False,
+        )
+        logger_ = RawDataLogger(tracking_uri=tracking_uri)
+        return logger_.log_trial(
+            params={"rq_um": 0.005, "lc_um": 2.0, "fractal_dim": 2.5},
+            metrics={"sq_um": 0.005, "haze_fft": 0.12},
+            df=df,
+            run_name="bare_trial",
+            plot_paths=None,
+        )
+
+    def test_visualize_log_to_mlflow_writes_back_html(self, tmp_path):
+        from mlflow.tracking import MlflowClient
+
+        tracking_uri = str(tmp_path / "mlruns")
+        run_id = self._make_bare_run(tmp_path, tracking_uri)
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        pre = client.list_artifacts(run_id, path="plots")
+        assert len(pre) == 0, "事前状態: plots/ は空であるべき"
+
+        output_html = tmp_path / "report.html"
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "visualize",
+            "--run-id", run_id,
+            "--tracking-uri", tracking_uri,
+            "--output", str(output_html),
+            "--log-to-mlflow",
+        ])
+        assert result.exit_code == 0, result.output
+        assert output_html.exists()
+
+        post = client.list_artifacts(run_id, path="plots")
+        names = {a.path.rsplit("/", 1)[-1] for a in post}
+        assert "report.html" in names
+
+    def test_visualize_without_log_to_mlflow_no_write_back(self, tmp_path):
+        """--no-log-to-mlflow（デフォルト）では書き戻さない。"""
+        from mlflow.tracking import MlflowClient
+
+        tracking_uri = str(tmp_path / "mlruns")
+        run_id = self._make_bare_run(tmp_path, tracking_uri)
+
+        output_html = tmp_path / "report2.html"
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "visualize",
+            "--run-id", run_id,
+            "--tracking-uri", tracking_uri,
+            "--output", str(output_html),
+        ])
+        assert result.exit_code == 0, result.output
+        assert output_html.exists()
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        post = client.list_artifacts(run_id, path="plots")
+        assert len(post) == 0, "書き戻しが無いため plots/ は空のまま"
