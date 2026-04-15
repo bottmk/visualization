@@ -659,6 +659,25 @@ panel==1.4.2
 | `TestLightToolsBsdfReaderInvalidFile` | ScatterAzimuth なし・DataBegin なしで ValueError |
 | `TestLoadBsdfReadersPlugin` | プラグインフォルダから自動登録・存在しないフォルダで例外なし |
 | `TestReadBsdfFileWithRealSample` | 実ファイル 24 ブロック・BRDF/BTDF 各 12・行数 91×361×24・非負 BSDF |
+| `TestGetConditions` | `get_conditions()` で実測 DataFrame リストから条件一覧を抽出 |
+| `TestSelectBlock` | `select_block()` の厳密一致・BRDF/BTDF 分離・tolerance 内最近傍・圏外 None |
+| `TestMergePerCondition` | `merge_sim_and_measured()` の条件ごと Log-RMSE（完全一致 0・10倍差 1.0・BRDF/BTDF 独立） |
+
+#### 9.2.10. 多条件シミュレーション・実測 BSDF 統合（`tests/test_config_loader.py`, `tests/test_cli.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `TestMultiConditionSupport::test_wavelength_{scalar,list}_*` | `wavelength_um` のスカラ/list 両対応（案 2-B） |
+| `TestMultiConditionSupport::test_theta_{scalar,list}_*` | `theta_i_deg` のスカラ/list 両対応 |
+| `TestMultiConditionSupport::test_mode_*` | `mode` のスカラ/list 両対応・invalid で ValueError |
+| `TestMultiConditionSupport::test_legacy_btdf_auto_detect` | mode 未指定で `theta_i > 90°` → BTDF 自動判定（旧互換） |
+| `TestMultiConditionSupport::test_explicit_mode_cartesian_product` | theta_i × mode 直積展開 |
+| `TestMultiConditionSupport::test_full_grid_24_conditions` | 3λ × 4AOI × 2mode = 24 条件の直積 |
+| `TestMeasuredBsdfConfig` | `measured_bsdf` セクション（path / match_measured / tolerance）の読み込み |
+| `TestCLIMultiCondition::test_multi_{wavelength,theta_i,mode}` | 多条件 `simulate` が Parquet に全条件を保存 |
+| `TestCLIMultiCondition::test_parquet_contains_multiple_conditions` | Parquet 内に 2λ × 2θ = 4 条件が保存される |
+| `TestCLIMeasuredBsdfReal::test_simulate_with_measured_bsdf_cli_option` | `--measured-bsdf` で実測読み込み・log_rmse 計算・Parquet に measured 行 |
+| `TestCLIMeasuredBsdfReal::test_simulate_match_measured_auto_conditions` | `match_measured: true` で実測 24 条件を sim に自動採用 |
 
 ---
 
@@ -862,3 +881,4 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | Keyence VK-X シリーズ対応 | DeviceVk6Surface を追加。Shift-JIS・ヘッダからピクセルサイズ・単位を自動取得。sample_inputs/device_vk6_sample.csv・config_device_vk6.yaml を同梱 | `67a1931` |
 | 4 種パディング方式追加 | MeasuredSurface に zeros/tile/reflect/smooth_tile パディングを実装。DeviceVk6Surface の pixel_size_um / grid_size ヘッダ自動算出を実装。テスト 131→172件 | — |
 | BSDF 実測ファイルリーダー（プラグイン方式） | custom_bsdf_readers/ に BaseBsdfFileReader サブクラスを置くだけで自動登録。LightToolsBsdfReader（LightTools/MiniDiff .bsdf）を実装。build_measured_dataframe に is_btdf 引数を追加。テスト 172→213件 | — |
+| 多条件シミュレーション＋実測 BSDF 統合 | 1 run 内で多波長・多入射角・BRDF/BTDF を実行可能に（案 2-B: スカラ/list 両対応）。`simulation.wavelength_um` / `theta_i_deg` / `mode` に list を指定すると直積展開。`measured_bsdf` セクションで実測ファイルを紐づけ、`match_measured: true` で実測条件を sim に自動採用、`--measured-bsdf` CLI オプションで上書き。条件ごとに `merge_sim_and_measured()` が Log-RMSE を自動計算。`select_block` / `get_conditions` ヘルパー追加。テスト 213→255件 | — |

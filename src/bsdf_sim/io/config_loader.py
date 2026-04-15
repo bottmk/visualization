@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import itertools
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def _as_list(value: Any) -> list:
+    """スカラまたは list を list に正規化する。None は空 list。"""
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return [value]
 
 
 # ── プリセット定義 ────────────────────────────────────────────────────────────
@@ -140,15 +150,25 @@ class BSDFConfig:
         """必須フィールドと値の範囲を検証する。"""
         sim = self._resolved.get("simulation", {})
 
-        # theta_i = 90° はエラー
-        theta_i = sim.get("theta_i_deg", 0.0)
-        if abs(theta_i - 90.0) < 1e-6:
-            raise ValueError("theta_i_deg = 90° は未定義。BRDF(<90°) または BTDF(>90°) を指定すること。")
+        # theta_i_deg（スカラ / list 両対応）: 90° はエラー
+        theta_raw = sim.get("theta_i_deg", 0.0)
+        for t in _as_list(theta_raw):
+            if abs(float(t) - 90.0) < 1e-6:
+                raise ValueError("theta_i_deg = 90° は未定義。BRDF(<90°) または BTDF(>90°) を指定すること。")
 
         # polarization
         pol = sim.get("polarization", "Unpolarized")
         if pol not in ("S", "P", "Unpolarized"):
             raise ValueError(f"polarization は 'S' / 'P' / 'Unpolarized' のいずれかでなければならない。値={pol}")
+
+        # mode（指定時）
+        mode_raw = sim.get("mode")
+        if mode_raw is not None:
+            for m in _as_list(mode_raw):
+                if m not in ("BRDF", "BTDF"):
+                    raise ValueError(
+                        f"simulation.mode は 'BRDF' / 'BTDF' のみ。値={m}"
+                    )
 
         # bsdf_floor
         floor = self._resolved.get("error_metrics", {}).get("bsdf_floor", 1e-6)
@@ -202,11 +222,15 @@ class BSDFConfig:
 
     @property
     def wavelength_um(self) -> float:
-        return float(self.simulation.get("wavelength_um", 0.55))
+        """主波長 [μm]（list の場合は先頭要素。1 条件 API 互換用）。"""
+        wls = self.wavelengths_um
+        return wls[0] if wls else 0.55
 
     @property
     def theta_i_deg(self) -> float:
-        return float(self.simulation.get("theta_i_deg", 0.0))
+        """主入射角 [deg]（list の場合は先頭要素。1 条件 API 互換用）。"""
+        thetas = self.theta_i_list_deg
+        return thetas[0] if thetas else 0.0
 
     @property
     def phi_i_deg(self) -> float:
@@ -226,12 +250,106 @@ class BSDFConfig:
 
     @property
     def is_btdf(self) -> bool:
-        """BTDF モード（theta_i > 90°）かどうか。"""
-        return self.theta_i_deg > 90.0
+        """BTDF モード（theta_i > 90° または主条件が BTDF）かどうか。"""
+        conds = self.conditions
+        if conds:
+            return conds[0]["mode"] == "BTDF"
+        return False
 
     @property
     def theta_i_effective_deg(self) -> float:
-        """BTDF モード時に表面側座標系に換算した有効入射角。"""
-        if self.is_btdf:
-            return abs(180.0 - self.theta_i_deg)
-        return self.theta_i_deg
+        """BTDF モード時に表面側座標系に換算した有効入射角（主条件）。"""
+        conds = self.conditions
+        if conds:
+            return float(conds[0]["theta_i_deg"])
+        return 0.0
+
+    # ── 多条件サポート（案 2-B: スカラ/list 両対応）──────────────────────
+
+    @property
+    def wavelengths_um(self) -> list[float]:
+        """正規化された波長リスト [μm]（スカラも list も受理）。"""
+        raw = self.simulation.get("wavelength_um", 0.55)
+        return [float(w) for w in _as_list(raw)]
+
+    @property
+    def theta_i_list_deg(self) -> list[float]:
+        """正規化された入射角リスト [deg]（スカラも list も受理）。"""
+        raw = self.simulation.get("theta_i_deg", 0.0)
+        return [float(t) for t in _as_list(raw)]
+
+    @property
+    def modes(self) -> list[str]:
+        """simulation.mode の正規化リスト。未指定時は空 list（旧互換判定を使用）。"""
+        raw = self.simulation.get("mode")
+        return [str(m) for m in _as_list(raw)]
+
+    @property
+    def conditions(self) -> list[dict[str, Any]]:
+        """正規化された光学条件リスト。各要素は 1 シミュレーション条件の dict。
+
+        生成規則:
+          - mode 未指定（旧互換）: theta_i_deg > 90° → BTDF に自動判定、
+            theta_i_effective = |180 - theta_i|
+          - mode 指定あり（新書式）: theta_i_deg × mode の直積
+          - wavelength_um 軸は常に直積展開
+
+        Returns:
+            dict リスト。各要素のキー: wavelength_um, theta_i_deg, mode,
+            phi_i_deg, n1, n2, polarization
+        """
+        wls = self.wavelengths_um or [0.55]
+        thetas_raw = self.theta_i_list_deg or [0.0]
+        modes_raw = self.modes
+
+        if not modes_raw:
+            # 旧互換: theta_i > 90° → BTDF、有効角 = |180 - theta|
+            theta_mode_pairs: list[tuple[float, str]] = []
+            for t in thetas_raw:
+                if t > 90.0:
+                    theta_mode_pairs.append((abs(180.0 - t), "BTDF"))
+                else:
+                    theta_mode_pairs.append((t, "BRDF"))
+        else:
+            # 新書式: theta_i × mode 直積
+            theta_mode_pairs = [(t, m) for t, m in itertools.product(thetas_raw, modes_raw)]
+
+        conditions: list[dict[str, Any]] = []
+        for wl in wls:
+            for theta_i, mode in theta_mode_pairs:
+                conditions.append({
+                    "wavelength_um": wl,
+                    "theta_i_deg": theta_i,
+                    "mode": mode,
+                    "phi_i_deg": self.phi_i_deg,
+                    "n1": self.n1,
+                    "n2": self.n2,
+                    "polarization": self.polarization,
+                })
+        return conditions
+
+    # ── measured_bsdf セクション ─────────────────────────────────────────
+
+    @property
+    def measured_bsdf(self) -> dict[str, Any]:
+        return self._resolved.get("measured_bsdf", {})
+
+    @property
+    def measured_bsdf_path(self) -> str | None:
+        path = self.measured_bsdf.get("path")
+        return str(path) if path else None
+
+    @property
+    def match_measured(self) -> bool:
+        """True: 実測ファイル内の条件を sim 条件として自動採用する。"""
+        return bool(self.measured_bsdf.get("match_measured", False))
+
+    @property
+    def match_tolerance_deg(self) -> float:
+        """sim 条件と実測ブロックのマッチング許容角 [deg]。デフォルト 1.0°。"""
+        return float(self.measured_bsdf.get("tolerance_deg", 1.0))
+
+    @property
+    def match_tolerance_nm(self) -> float:
+        """sim 条件と実測ブロックのマッチング許容波長 [nm]。デフォルト 5.0nm。"""
+        return float(self.measured_bsdf.get("tolerance_nm", 5.0))

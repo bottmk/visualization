@@ -401,3 +401,220 @@ class TestReadBsdfFileWithRealSample:
         register_reader(LightToolsBsdfReader)
         dfs = read_bsdf_file(self.SAMPLE)
         assert len(dfs) == 24
+
+
+# ── ブロック選択・条件抽出ヘルパー ────────────────────────────────────────────
+
+
+class TestGetConditions:
+    """get_conditions() — 実測 DataFrame リストから条件を抽出。"""
+
+    def test_mini_file_conditions(self, mini_bsdf_file):
+        from custom_bsdf_readers.lightools_bsdf import LightToolsBsdfReader
+        from bsdf_sim.io.bsdf_reader import get_conditions
+
+        dfs = LightToolsBsdfReader.read(mini_bsdf_file)
+        conds = get_conditions(dfs)
+        assert len(conds) == 2
+
+        # 第1ブロック: AOI=0, WL=532, BRDF
+        assert conds[0]["theta_i_deg"] == pytest.approx(0.0)
+        assert conds[0]["wavelength_um"] == pytest.approx(0.532, abs=1e-4)
+        assert conds[0]["mode"] == "BRDF"
+
+        # 第2ブロック: AOI=20, WL=532, BTDF
+        assert conds[1]["theta_i_deg"] == pytest.approx(20.0)
+        assert conds[1]["mode"] == "BTDF"
+
+    def test_empty_list(self):
+        from bsdf_sim.io.bsdf_reader import get_conditions
+        assert get_conditions([]) == []
+
+    def test_skips_empty_dataframes(self):
+        from bsdf_sim.io.bsdf_reader import get_conditions
+        empty_df = pd.DataFrame(columns=[
+            "wavelength_um", "theta_i_deg", "mode", "phi_i_deg"
+        ])
+        assert get_conditions([empty_df]) == []
+
+
+class TestSelectBlock:
+    """select_block() — tolerance 付き最近傍マッチング。"""
+
+    def _make_block(self, wl_um, theta_i, mode):
+        """最小限の 1 行 DataFrame を作る。"""
+        return pd.DataFrame({
+            "u":             [0.0],
+            "v":             [0.0],
+            "theta_s_deg":   [0.0],
+            "phi_s_deg":     [0.0],
+            "theta_i_deg":   [theta_i],
+            "phi_i_deg":     [0.0],
+            "wavelength_um": [wl_um],
+            "polarization":  pd.Categorical(["Unpolarized"],
+                                            categories=["S", "P", "Unpolarized"]),
+            "mode":          pd.Categorical([mode], categories=["BRDF", "BTDF"]),
+            "method":        pd.Categorical(["measured"],
+                                            categories=["FFT", "PSD", "MultiLayer", "measured"]),
+            "bsdf":          [0.01],
+            "is_measured":   [True],
+            "log_rmse":      [float("nan")],
+        })
+
+    @pytest.fixture()
+    def dfs(self):
+        return [
+            self._make_block(0.465, 0,  "BRDF"),
+            self._make_block(0.525, 0,  "BRDF"),
+            self._make_block(0.630, 0,  "BRDF"),
+            self._make_block(0.525, 20, "BRDF"),
+            self._make_block(0.525, 20, "BTDF"),
+        ]
+
+    def test_exact_match(self, dfs):
+        from bsdf_sim.io.bsdf_reader import select_block
+        sel = select_block(dfs, wavelength_um=0.525, theta_i_deg=20, mode="BRDF")
+        assert sel is not None
+        assert float(sel["wavelength_um"].iloc[0]) == pytest.approx(0.525)
+        assert float(sel["theta_i_deg"].iloc[0]) == pytest.approx(20.0)
+        assert str(sel["mode"].iloc[0]) == "BRDF"
+
+    def test_brdf_vs_btdf_strict(self, dfs):
+        from bsdf_sim.io.bsdf_reader import select_block
+        # 同じ AOI・波長でも mode が違えば別ブロック
+        sel_brdf = select_block(dfs, 0.525, 20, "BRDF")
+        sel_btdf = select_block(dfs, 0.525, 20, "BTDF")
+        assert str(sel_brdf["mode"].iloc[0]) == "BRDF"
+        assert str(sel_btdf["mode"].iloc[0]) == "BTDF"
+
+    def test_within_tolerance_returns_nearest(self, dfs):
+        from bsdf_sim.io.bsdf_reader import select_block
+        # sim 波長 0.524 → 0.525 にマッチ（tol=5nm 内）
+        sel = select_block(
+            dfs, wavelength_um=0.524, theta_i_deg=0.3, mode="BRDF",
+            tolerance_deg=1.0, tolerance_nm=5.0,
+        )
+        assert sel is not None
+        assert float(sel["wavelength_um"].iloc[0]) == pytest.approx(0.525)
+        assert float(sel["theta_i_deg"].iloc[0]) == pytest.approx(0.0)
+
+    def test_out_of_tolerance_returns_none(self, dfs):
+        from bsdf_sim.io.bsdf_reader import select_block
+        sel = select_block(
+            dfs, wavelength_um=0.500, theta_i_deg=0, mode="BRDF",
+            tolerance_nm=5.0,  # 25nm 離れているので圏外
+        )
+        assert sel is None
+
+    def test_mode_mismatch_returns_none(self, dfs):
+        from bsdf_sim.io.bsdf_reader import select_block
+        # BTDF しか無い AOI=99 条件
+        sel = select_block(dfs, 0.525, 99, "BTDF", tolerance_deg=1.0)
+        assert sel is None
+
+
+class TestMergePerCondition:
+    """merge_sim_and_measured の多条件 Log-RMSE 計算。"""
+
+    def _sim_df(self, method, wl, theta_i, mode, bsdf_val=0.01):
+        from bsdf_sim.io.parquet_schema import build_dataframe
+        u = np.linspace(-0.5, 0.5, 11).reshape(-1, 1)
+        v = np.linspace(-0.5, 0.5, 11).reshape(1, -1)
+        u_grid = np.broadcast_to(u, (11, 11)).copy()
+        v_grid = np.broadcast_to(v, (11, 11)).copy()
+        bsdf = np.full_like(u_grid, bsdf_val, dtype=np.float32)
+        return build_dataframe(
+            u_grid, v_grid, bsdf, method,
+            theta_i_deg=theta_i, phi_i_deg=0.0,
+            wavelength_um=wl, polarization="Unpolarized",
+            is_btdf=(mode == "BTDF"),
+        )
+
+    def _meas_df(self, wl, theta_i, mode, bsdf_val=0.01):
+        from bsdf_sim.io.parquet_schema import build_measured_dataframe
+        theta_s = np.array([0.0, 10.0, 20.0, 30.0])
+        phi_s   = np.array([0.0, 90.0, 180.0, 270.0])
+        bsdf    = np.full(4, bsdf_val, dtype=np.float32)
+        return build_measured_dataframe(
+            theta_s, phi_s, bsdf,
+            theta_i_deg=theta_i, phi_i_deg=0.0,
+            wavelength_nm=wl * 1000.0, polarization="Unpolarized",
+            is_btdf=(mode == "BTDF"),
+        )
+
+    def test_perfect_match_rmse_zero(self):
+        """sim と実測が同じ値 → Log-RMSE ≈ 0。"""
+        from bsdf_sim.io.parquet_schema import merge_sim_and_measured
+        sim = self._sim_df("FFT", 0.525, 20, "BRDF", bsdf_val=0.01)
+        meas = self._meas_df(0.525, 20, "BRDF", bsdf_val=0.01)
+        combined = merge_sim_and_measured(sim, meas, bsdf_floor=1e-8)
+        # FFT 行の log_rmse
+        fft_rows = combined[combined["method"] == "FFT"]
+        assert fft_rows["log_rmse"].dropna().min() == pytest.approx(0.0, abs=1e-4)
+
+    def test_order_of_magnitude_difference(self):
+        """sim が 10 倍大きい → log_rmse ≈ 1.0。"""
+        from bsdf_sim.io.parquet_schema import merge_sim_and_measured
+        sim = self._sim_df("FFT", 0.525, 20, "BRDF", bsdf_val=0.1)
+        meas = self._meas_df(0.525, 20, "BRDF", bsdf_val=0.01)
+        combined = merge_sim_and_measured(sim, meas, bsdf_floor=1e-8)
+        rmse = combined[combined["method"] == "FFT"]["log_rmse"].dropna().iloc[0]
+        assert rmse == pytest.approx(1.0, abs=1e-3)
+
+    def test_per_condition_independent_rmse(self):
+        """2 条件で異なる誤差 → それぞれ独立に log_rmse を記録。"""
+        from bsdf_sim.io.parquet_schema import merge_sim_and_measured
+        # 条件 A: 完全一致（log_rmse ≈ 0）
+        sim_a  = self._sim_df("FFT", 0.525, 0, "BRDF", bsdf_val=0.01)
+        meas_a = self._meas_df(0.525, 0, "BRDF", bsdf_val=0.01)
+        # 条件 B: 10 倍差（log_rmse ≈ 1）
+        sim_b  = self._sim_df("FFT", 0.525, 20, "BRDF", bsdf_val=0.1)
+        meas_b = self._meas_df(0.525, 20, "BRDF", bsdf_val=0.01)
+
+        sim  = pd.concat([sim_a,  sim_b],  ignore_index=True)
+        meas = pd.concat([meas_a, meas_b], ignore_index=True)
+        combined = merge_sim_and_measured(sim, meas, bsdf_floor=1e-8)
+
+        # 条件 A の FFT 行
+        mask_a = (
+            (combined["method"] == "FFT")
+            & (np.abs(combined["theta_i_deg"].values - 0.0) < 1e-6)
+        )
+        mask_b = (
+            (combined["method"] == "FFT")
+            & (np.abs(combined["theta_i_deg"].values - 20.0) < 1e-6)
+        )
+        rmse_a = combined.loc[mask_a, "log_rmse"].dropna().iloc[0]
+        rmse_b = combined.loc[mask_b, "log_rmse"].dropna().iloc[0]
+        assert rmse_a == pytest.approx(0.0, abs=1e-3)
+        assert rmse_b == pytest.approx(1.0, abs=1e-3)
+
+    def test_brdf_vs_btdf_separate_rmse(self):
+        """同じ AOI・波長でも BRDF と BTDF は別々に比較される。"""
+        from bsdf_sim.io.parquet_schema import merge_sim_and_measured
+        sim_brdf  = self._sim_df("FFT", 0.525, 20, "BRDF", bsdf_val=0.01)
+        sim_btdf  = self._sim_df("FFT", 0.525, 20, "BTDF", bsdf_val=0.1)
+        meas_brdf = self._meas_df(0.525, 20, "BRDF", bsdf_val=0.01)
+        meas_btdf = self._meas_df(0.525, 20, "BTDF", bsdf_val=0.01)
+
+        sim  = pd.concat([sim_brdf,  sim_btdf],  ignore_index=True)
+        meas = pd.concat([meas_brdf, meas_btdf], ignore_index=True)
+        combined = merge_sim_and_measured(sim, meas, bsdf_floor=1e-8)
+
+        mask_brdf = (combined["method"] == "FFT") & (combined["mode"] == "BRDF")
+        mask_btdf = (combined["method"] == "FFT") & (combined["mode"] == "BTDF")
+        rmse_brdf = combined.loc[mask_brdf, "log_rmse"].dropna().iloc[0]
+        rmse_btdf = combined.loc[mask_btdf, "log_rmse"].dropna().iloc[0]
+        assert rmse_brdf == pytest.approx(0.0, abs=1e-3)
+        assert rmse_btdf == pytest.approx(1.0, abs=1e-3)
+
+    def test_no_measured_match_leaves_nan(self):
+        """tolerance 外 → log_rmse は NaN のまま。"""
+        from bsdf_sim.io.parquet_schema import merge_sim_and_measured
+        sim  = self._sim_df("FFT", 0.525, 20, "BRDF")
+        meas = self._meas_df(0.700, 20, "BRDF")  # λ 差 175nm（圏外）
+        combined = merge_sim_and_measured(
+            sim, meas, bsdf_floor=1e-8, tolerance_nm=5.0
+        )
+        fft_rows = combined[combined["method"] == "FFT"]
+        assert fft_rows["log_rmse"].isna().all()

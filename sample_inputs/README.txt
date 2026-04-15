@@ -26,6 +26,9 @@ BRDF_BTDF_LightTools.bsdf
   - データ: 24 ブロック（BRDF/BTDF × AOI 4 種 × 波長 3 種）
   - ブロック構造: AOI/POI/Side/Wavelength/ScatterType/TIS + 361 行 × 91 列タブ区切り BSDF 値
   - 対応リーダー: custom_bsdf_readers/lightools_bsdf.py (LightToolsBsdfReader)
+  - 使い方:
+      bsdf simulate -c config.yaml --measured-bsdf sample_inputs/BRDF_BTDF_LightTools.bsdf
+    または config.yaml の measured_bsdf: セクションで指定（config_device_vk6.yaml 参照）
 
 今後追加予定のフォーマット
 --------------------------

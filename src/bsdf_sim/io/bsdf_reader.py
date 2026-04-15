@@ -124,6 +124,83 @@ def list_readers() -> list[str]:
 
 # ── 自動検出・読み込み ─────────────────────────────────────────────────────────
 
+def get_conditions(dfs: list[pd.DataFrame]) -> list[dict]:
+    """実測 DataFrame リストから光学条件の一覧を抽出する。
+
+    各 DataFrame は単一の (wavelength_um, theta_i_deg, mode) を持つ前提。
+    先頭行の値を代表値として取り出す。
+
+    Args:
+        dfs: `read_bsdf_file()` が返す DataFrame リスト
+
+    Returns:
+        dict リスト。各要素のキー: wavelength_um, theta_i_deg, mode, phi_i_deg
+    """
+    conds: list[dict] = []
+    for df in dfs:
+        if len(df) == 0:
+            continue
+        conds.append({
+            "wavelength_um": float(df["wavelength_um"].iloc[0]),
+            "theta_i_deg":   float(df["theta_i_deg"].iloc[0]),
+            "mode":          str(df["mode"].iloc[0]),
+            "phi_i_deg":     float(df["phi_i_deg"].iloc[0]),
+        })
+    return conds
+
+
+def select_block(
+    dfs: list[pd.DataFrame],
+    wavelength_um: float,
+    theta_i_deg: float,
+    mode: str,
+    tolerance_deg: float = 1.0,
+    tolerance_nm: float = 5.0,
+) -> pd.DataFrame | None:
+    """tolerance 内で最も近い実測ブロックを返す。
+
+    mode（'BRDF'/'BTDF'）は厳密一致必須。tolerance を超える候補は除外し、
+    残った候補の中で (正規化距離)² が最小のブロックを返す。
+
+    Args:
+        dfs: `read_bsdf_file()` が返す DataFrame リスト
+        wavelength_um: 目標波長 [μm]
+        theta_i_deg:   目標入射角 [deg]
+        mode:          'BRDF' または 'BTDF'
+        tolerance_deg: 入射角の許容誤差 [deg]
+        tolerance_nm:  波長の許容誤差 [nm]
+
+    Returns:
+        最近傍のブロック DataFrame、該当なしなら None
+    """
+    best: pd.DataFrame | None = None
+    best_dist = float("inf")
+    target_wl_nm = wavelength_um * 1000.0
+
+    for df in dfs:
+        if len(df) == 0:
+            continue
+        if str(df["mode"].iloc[0]) != mode:
+            continue
+
+        df_wl_nm = float(df["wavelength_um"].iloc[0]) * 1000.0
+        df_theta = float(df["theta_i_deg"].iloc[0])
+
+        dw_nm = abs(df_wl_nm - target_wl_nm)
+        dt_deg = abs(df_theta - theta_i_deg)
+
+        if dw_nm > tolerance_nm or dt_deg > tolerance_deg:
+            continue
+
+        # 正規化距離（各許容値を単位 1 として扱う）
+        dist = (dw_nm / tolerance_nm) ** 2 + (dt_deg / tolerance_deg) ** 2
+        if dist < best_dist:
+            best_dist = dist
+            best = df
+
+    return best
+
+
 def read_bsdf_file(
     path: str | Path,
     reader_name: str | None = None,

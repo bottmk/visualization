@@ -1,25 +1,59 @@
-# Keyence VK-X シリーズ使用時の config.yaml サンプル
-# bsdf simulate --config sample_inputs/config_device_vk6.yaml -m fft で実行
+# Keyence VK-X シリーズ使用時の config.yaml サンプル（最新版）
+#
+# 対応機能:
+#   - padding 指定（zeros / tile / reflect / smooth_tile）
+#   - grid_size / pixel_size_um のヘッダ自動算出（省略時）
+#   - 多波長・多入射角・BRDF/BTDF の 1 run 実行
+#   - BSDF 実測ファイル（.bsdf）との自動比較
+#
+# 使用例:
+#   bsdf simulate --config sample_inputs/config_device_vk6.yaml -m fft
+#   bsdf simulate --config sample_inputs/config_device_vk6.yaml -m both --log-to-mlflow
 
 simulation:
-  wavelength_um: 0.55
-  theta_i_deg: 0.0
+  # スカラでも list でも指定可能（案 2-B）
+  # 1 条件の例:
+  #   wavelength_um: 0.55
+  #   theta_i_deg: 0.0
+  # 多条件の例（LightTools 実測ファイルに合わせた 24 条件グリッド）:
+  wavelength_um: [0.465, 0.525, 0.630]     # 3 波長
+  theta_i_deg:   [0.0, 20.0, 40.0, 60.0]   # 4 入射角
+  mode:          ['BRDF', 'BTDF']          # 2 モード（直積で 24 条件）
   phi_i_deg: 0.0
   n1: 1.0
   n2: 1.5
   polarization: 'Unpolarized'
 
 surface:
-  model: 'DeviceVk6Surface'     # custom_surfaces/device_vk6.py から自動ロード
-  grid_size: 4096
-  pixel_size_um: 0.25
+  model: 'DeviceVk6Surface'      # custom_surfaces/device_vk6.py から自動ロード
+  # grid_size と pixel_size_um は省略可能:
+  #   省略時 → ヘッダの XYキャリブレーション値・データサイズから自動算出
+  #   明示時 → その値を使用（zoom）
+  # grid_size: 4096
+  # pixel_size_um: 0.25
   measured:
     path: 'sample_inputs/device_vk6_sample.csv'
-    # source_pixel_size_um は省略可能（ヘッダの XYキャリブレーション行から自動取得）
-    # source_pixel_size_um: 0.136  # 手動で上書きする場合はここで指定
+    # source_pixel_size_um は省略可能（ヘッダから自動取得）
+    # source_pixel_size_um: 0.136
     leveling: true
+    padding: 'tile'              # zeros / tile / reflect / smooth_tile
+    #   zeros       - 中央ゼロパディング（データ外は平坦面）
+    #   tile        - タイリング（FFT 周期境界と整合。AG フィルム等に推奨）
+    #   reflect     - ミラー反転タイリング（C0 連続だが偽ピークあり）
+    #   smooth_tile - タイリング＋FFT 周期境界コサインブレンド（C∞ 連続）
 
-bsdf_floor: 1.0e-6
+# ── BSDF 実測ファイルとの比較 ─────────────────────────────────────────
+# 省略可。指定時は sim 結果と合わせて Parquet に保存され、
+# 条件ごとに Log-RMSE が自動計算される。
+measured_bsdf:
+  path: 'sample_inputs/BRDF_BTDF_LightTools.bsdf'
+  match_measured: true          # true: 実測ファイル内の条件を sim に自動採用
+                                # false: simulation: セクションの条件で実行
+  tolerance_deg: 1.0            # sim⇔実測マッチングの入射角許容 [deg]
+  tolerance_nm: 5.0             # 波長許容 [nm]
+
+error_metrics:
+  bsdf_floor: 1.0e-6
 
 metrics:
   haze:
@@ -32,3 +66,4 @@ metrics:
     enabled: false
   sparkle:
     enabled: false
+    # 多波長時は波長ごとに計算・記録される（sparkle_r_fft_wl465nm_aoi0_brdf 等）

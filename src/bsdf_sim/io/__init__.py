@@ -2,10 +2,12 @@
 
 from .bsdf_reader import (
     BaseBsdfFileReader,
+    get_conditions,
     list_readers,
     load_bsdf_readers,
     read_bsdf_file,
     register_reader,
+    select_block,
 )
 from .config_loader import BSDFConfig
 from .parquet_schema import (
@@ -28,4 +30,6 @@ __all__ = [
     "read_bsdf_file",
     "register_reader",
     "list_readers",
+    "get_conditions",
+    "select_block",
 ]

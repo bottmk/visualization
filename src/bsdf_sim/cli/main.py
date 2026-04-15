@@ -43,21 +43,29 @@ def cli() -> None:
 @click.option("--method", "-m", default="both", type=click.Choice(["fft", "psd", "both"]), show_default=True, help="計算手法")
 @click.option("--save-parquet/--no-save-parquet", default=True, show_default=True, help="Parquet 保存の有無")
 @click.option("--log-to-mlflow/--no-log-to-mlflow", default=False, show_default=True, help="MLflow への記録")
+@click.option("--measured-bsdf", default=None, type=click.Path(exists=True),
+              help="BSDF 実測ファイルパス（.bsdf）。指定時は config.measured_bsdf.path を上書き。")
+@click.option("--match-measured/--no-match-measured", default=None,
+              help="実測ファイル内の光学条件を sim 条件として自動採用するか。省略時は config の値を使用。")
 def simulate(
     config: str,
     output_dir: str,
     method: str,
     save_parquet: bool,
     log_to_mlflow: bool,
+    measured_bsdf: str | None,
+    match_measured: bool | None,
 ) -> None:
     """BSDF シミュレーションを単体実行する。"""
     from ..io.config_loader import BSDFConfig
+    from ..io import get_conditions as _meas_get_conditions, load_bsdf_readers, read_bsdf_file
+    from ..io.parquet_schema import build_dataframe, merge_sim_and_measured
+    from ..io.parquet_schema import save_parquet as _save_parquet
+    from ..metrics.optical import compute_all_optical_metrics
+    from ..metrics.surface import compute_all_surface_metrics
     from ..models import create_model_from_config, load_plugins
     from ..optics.fft_bsdf import compute_bsdf_fft
     from ..optics.psd_bsdf import compute_bsdf_psd
-    from ..io.parquet_schema import build_dataframe, save_parquet as _save_parquet
-    from ..metrics.surface import compute_all_surface_metrics
-    from ..metrics.optical import compute_all_optical_metrics
 
     cfg = BSDFConfig.from_file(config)
     load_plugins()
@@ -83,73 +91,123 @@ def simulate(
     out_path = Path(output_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
-    all_dfs = []
     approx_mode = cfg._resolved.get("psd", {}).get("approx_mode", False)
 
-    # 光学指標計算に使う u, v, bsdf を明示的に追跡（method によらず正しい変数を使う）
+    # ── 実測 BSDF の読み込み（CLI/config どちらからでも）──────────────────
+    effective_measured_path = measured_bsdf or cfg.measured_bsdf_path
+    effective_match_measured = match_measured if match_measured is not None else cfg.match_measured
+
+    measured_dfs: list = []
+    if effective_measured_path:
+        logger.info(f"BSDF 実測ファイル読み込み中: {effective_measured_path}")
+        load_bsdf_readers()
+        measured_dfs = read_bsdf_file(effective_measured_path)
+        logger.info(f"      ブロック数: {len(measured_dfs)}")
+
+    # ── 光学条件リストの決定 ──────────────────────────────────────────────
+    if effective_match_measured and measured_dfs:
+        meas_conds = _meas_get_conditions(measured_dfs)
+        conditions = [
+            {
+                "wavelength_um": c["wavelength_um"],
+                "theta_i_deg":   c["theta_i_deg"],
+                "mode":          c["mode"],
+                "phi_i_deg":     cfg.phi_i_deg,
+                "n1":            cfg.n1,
+                "n2":            cfg.n2,
+                "polarization":  cfg.polarization,
+            }
+            for c in meas_conds
+        ]
+        logger.info(
+            f"match_measured=true: 実測ファイルから {len(conditions)} 条件を採用"
+        )
+    else:
+        conditions = cfg.conditions
+
+    multi = len(conditions) > 1
+    logger.info(
+        f"光学条件数: {len(conditions)} "
+        f"({len(cfg.wavelengths_um)} λ × {len(cfg.theta_i_list_deg)} θ_i × "
+        f"{len(cfg.modes) or 1} mode)"
+    )
+
+    # ── BSDF 計算（全条件ループ）────────────────────────────────────────
+    step3_label = {"fft": "FFT", "psd": "PSD", "both": "FFT + PSD"}[method]
+    logger.info(f"[3/4] {step3_label} 計算中... ({len(conditions)} 条件)")
+
+    all_dfs: list = []
+    # 条件ごとの (u, v, bsdf) を手法別に保持（光学指標計算で使う）
+    method_bsdf_by_cond: dict[tuple, dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]]] = {}
+    # Adding-Doubling 用 primary（最初の条件の最初の手法）
     u_primary: np.ndarray | None = None
     v_primary: np.ndarray | None = None
     bsdf_primary: np.ndarray | None = None
 
-    # 手法ごとの (u, v, bsdf) を保持（光学指標を手法別に計算するため）
-    method_bsdf: dict[str, tuple[np.ndarray, np.ndarray, np.ndarray]] = {}
+    for i_cond, cond in enumerate(conditions):
+        wl_um = cond["wavelength_um"]
+        theta_i = cond["theta_i_deg"]
+        mode = cond["mode"]
+        is_btdf = mode == "BTDF"
+        cond_key = (wl_um, theta_i, mode)
+        method_bsdf_by_cond[cond_key] = {}
 
-    # [3] BSDF 計算
-    step3_label = {"fft": "FFT", "psd": "PSD", "both": "FFT + PSD"}[method]
-    logger.info(f"[3/4] {step3_label} 計算中...")
+        logger.info(
+            f"      [{i_cond + 1}/{len(conditions)}] "
+            f"λ={wl_um * 1000:.0f}nm, θ_i={theta_i:.1f}°, {mode}"
+        )
 
-    # FFT 計算
-    if method in ("fft", "both"):
-        t0 = time.perf_counter()
-        logger.info("      FFT 法...")
-        u, v, bsdf_fft = compute_bsdf_fft(
-            height_map=hm,
-            wavelength_um=cfg.wavelength_um,
-            theta_i_deg=cfg.theta_i_effective_deg,
-            phi_i_deg=cfg.phi_i_deg,
-            n1=cfg.n1,
-            n2=cfg.n2,
-            polarization=cfg.polarization,
-            is_btdf=cfg.is_btdf,
-        )
-        u_primary, v_primary, bsdf_primary = u, v, bsdf_fft
-        method_bsdf["fft"] = (u, v, bsdf_fft)
-        df_fft = build_dataframe(
-            u, v, bsdf_fft, "FFT",
-            cfg.theta_i_deg, cfg.phi_i_deg, cfg.wavelength_um, cfg.polarization,
-            is_btdf=cfg.is_btdf,
-        )
-        all_dfs.append(df_fft)
-        logger.info(f"      FFT 完了 ({_elapsed(t0)})")
+        if method in ("fft", "both"):
+            t0 = time.perf_counter()
+            u, v, bsdf_fft = compute_bsdf_fft(
+                height_map=hm,
+                wavelength_um=wl_um,
+                theta_i_deg=theta_i,
+                phi_i_deg=cond["phi_i_deg"],
+                n1=cond["n1"],
+                n2=cond["n2"],
+                polarization=cond["polarization"],
+                is_btdf=is_btdf,
+            )
+            method_bsdf_by_cond[cond_key]["fft"] = (u, v, bsdf_fft)
+            if u_primary is None:
+                u_primary, v_primary, bsdf_primary = u, v, bsdf_fft
+            all_dfs.append(build_dataframe(
+                u, v, bsdf_fft, "FFT",
+                theta_i, cond["phi_i_deg"], wl_um, cond["polarization"],
+                is_btdf=is_btdf,
+            ))
+            logger.info(f"          FFT 完了 ({_elapsed(t0)})")
 
-    # PSD 計算
-    if method in ("psd", "both"):
-        t0 = time.perf_counter()
-        logger.info(f"      PSD 法 (approx_mode={approx_mode})...")
-        u, v, bsdf_psd = compute_bsdf_psd(
-            height_map=hm,
-            wavelength_um=cfg.wavelength_um,
-            theta_i_deg=cfg.theta_i_effective_deg,
-            phi_i_deg=cfg.phi_i_deg,
-            n1=cfg.n1,
-            n2=cfg.n2,
-            polarization=cfg.polarization,
-            is_btdf=cfg.is_btdf,
-            approx_mode=approx_mode,
-        )
-        if u_primary is None:  # FFT なし（method='psd'）の場合は PSD を primary に
-            u_primary, v_primary, bsdf_primary = u, v, bsdf_psd
-        method_bsdf["psd"] = (u, v, bsdf_psd)
-        df_psd = build_dataframe(
-            u, v, bsdf_psd, "PSD",
-            cfg.theta_i_deg, cfg.phi_i_deg, cfg.wavelength_um, cfg.polarization,
-            is_btdf=cfg.is_btdf,
-        )
-        all_dfs.append(df_psd)
-        logger.info(f"      PSD 完了 ({_elapsed(t0)})")
+        if method in ("psd", "both"):
+            t0 = time.perf_counter()
+            u, v, bsdf_psd = compute_bsdf_psd(
+                height_map=hm,
+                wavelength_um=wl_um,
+                theta_i_deg=theta_i,
+                phi_i_deg=cond["phi_i_deg"],
+                n1=cond["n1"],
+                n2=cond["n2"],
+                polarization=cond["polarization"],
+                is_btdf=is_btdf,
+                approx_mode=approx_mode,
+            )
+            method_bsdf_by_cond[cond_key]["psd"] = (u, v, bsdf_psd)
+            if u_primary is None:
+                u_primary, v_primary, bsdf_primary = u, v, bsdf_psd
+            all_dfs.append(build_dataframe(
+                u, v, bsdf_psd, "PSD",
+                theta_i, cond["phi_i_deg"], wl_um, cond["polarization"],
+                is_btdf=is_btdf,
+            ))
+            logger.info(f"          PSD 完了 ({_elapsed(t0)})")
 
-    # Adding-Doubling 多層合成（config で enabled: true の場合のみ）
+    # Adding-Doubling 多層合成（主条件のみ）
     if cfg.adding_doubling.get("enabled", False) and bsdf_primary is not None:
+        if multi:
+            logger.warning(
+                "Adding-Doubling は多条件実行の最初の条件にのみ適用される。"
+            )
         logger.info("Adding-Doubling 多層合成を実行中...")
         from ..optics.multilayer import MultiLayerBSDF
         ad_cfg = cfg.adding_doubling
@@ -169,45 +227,101 @@ def simulate(
                     thickness_um=float(layer.get("thickness_um", 100.0)),
                 )
         u_ml, v_ml, bsdf_ml = ml_bsdf.to_bsdf_2d(u_primary, v_primary)
-        df_ml = build_dataframe(
+        # 主条件の値を使って DataFrame を作成
+        primary = conditions[0]
+        all_dfs.append(build_dataframe(
             u_ml, v_ml, bsdf_ml, "MultiLayer",
-            cfg.theta_i_deg, cfg.phi_i_deg, cfg.wavelength_um, cfg.polarization,
-            is_btdf=cfg.is_btdf,
-        )
-        all_dfs.append(df_ml)
+            primary["theta_i_deg"], primary["phi_i_deg"],
+            primary["wavelength_um"], primary["polarization"],
+            is_btdf=(primary["mode"] == "BTDF"),
+        ))
+        method_bsdf_by_cond[(primary["wavelength_um"], primary["theta_i_deg"], primary["mode"])]["ml"] = (u_ml, v_ml, bsdf_ml)
         u_primary, v_primary, bsdf_primary = u_ml, v_ml, bsdf_ml
-        method_bsdf["ml"] = (u_ml, v_ml, bsdf_ml)
         logger.info("Adding-Doubling 完了。")
 
     if all_dfs and bsdf_primary is not None:
         import pandas as pd
         df_combined = pd.concat(all_dfs, ignore_index=True)
 
-        # [4] 光学指標（手法ごとに計算し _fft / _psd / _ml サフィックスで記録）
+        # [4] 光学指標（条件 × 手法ごとに計算）
         enabled_metrics = [
             k for k in ("haze", "gloss", "doi", "sparkle")
             if cfg.metrics.get(k) is not None and cfg.metrics[k].get("enabled", True)
         ]
-        method_keys = list(method_bsdf.keys())
         logger.info(
-            f"[4/4] 光学指標計算中... "
-            f"({', '.join(enabled_metrics) or 'なし'}) × {method_keys}"
+            f"[4/4] 光学指標計算中... ({', '.join(enabled_metrics) or 'なし'}) × "
+            f"{len(method_bsdf_by_cond)} 条件"
         )
         t0 = time.perf_counter()
         all_optical_metrics: dict[str, float] = {}
-        for method_key, (u_m, v_m, bsdf_m) in method_bsdf.items():
-            metrics_m = compute_all_optical_metrics(
-                u_grid=u_m,
-                v_grid=v_m,
-                bsdf=bsdf_m,
-                config=cfg.metrics,
-                bsdf_floor=cfg.bsdf_floor,
-            )
-            for k, val in metrics_m.items():
-                all_optical_metrics[f"{k}_{method_key}"] = val
+        for cond_key, method_data in method_bsdf_by_cond.items():
+            wl_um, theta_i, mode = cond_key
+            for method_key, (u_m, v_m, bsdf_m) in method_data.items():
+                metrics_m = compute_all_optical_metrics(
+                    u_grid=u_m,
+                    v_grid=v_m,
+                    bsdf=bsdf_m,
+                    config=cfg.metrics,
+                    bsdf_floor=cfg.bsdf_floor,
+                )
+                for k, val in metrics_m.items():
+                    if multi:
+                        # 多条件時は条件サフィックス付き
+                        suffix = (
+                            f"_{method_key}"
+                            f"_wl{int(round(wl_um * 1000))}nm"
+                            f"_aoi{int(round(theta_i))}"
+                            f"_{mode.lower()}"
+                        )
+                    else:
+                        suffix = f"_{method_key}"
+                    all_optical_metrics[f"{k}{suffix}"] = val
         logger.info(f"      完了 ({_elapsed(t0)})")
-        for k, val in all_optical_metrics.items():
-            logger.info(f"        {k} = {val:.6f}")
+        if not multi:
+            for k, val in all_optical_metrics.items():
+                logger.info(f"        {k} = {val:.6f}")
+
+        # 実測データとの結合＋Log-RMSE（条件ごと）
+        if measured_dfs:
+            meas_df_concat = pd.concat(measured_dfs, ignore_index=True)
+            df_combined = merge_sim_and_measured(
+                sim_df=df_combined,
+                meas_df=meas_df_concat,
+                bsdf_floor=cfg.bsdf_floor,
+                tolerance_deg=cfg.match_tolerance_deg,
+                tolerance_nm=cfg.match_tolerance_nm,
+            )
+            # Log-RMSE を all_optical_metrics にも記録
+            sim_keys = df_combined[
+                df_combined["method"] != "measured"
+            ][["method", "wavelength_um", "theta_i_deg", "mode"]].drop_duplicates()
+            for _, row in sim_keys.iterrows():
+                mask = (
+                    (df_combined["method"].values == row["method"])
+                    & (np.abs(df_combined["wavelength_um"].values - row["wavelength_um"]) < 1e-6)
+                    & (np.abs(df_combined["theta_i_deg"].values - row["theta_i_deg"]) < 1e-6)
+                    & (df_combined["mode"].values == row["mode"])
+                )
+                rmse_vals = df_combined.loc[mask, "log_rmse"].values
+                if len(rmse_vals) == 0:
+                    continue
+                rmse = float(rmse_vals[0])
+                if not np.isnan(rmse):
+                    method_key = str(row["method"]).lower()
+                    if multi:
+                        suffix = (
+                            f"_{method_key}"
+                            f"_wl{int(round(row['wavelength_um'] * 1000))}nm"
+                            f"_aoi{int(round(row['theta_i_deg']))}"
+                            f"_{str(row['mode']).lower()}"
+                        )
+                    else:
+                        suffix = f"_{method_key}"
+                    all_optical_metrics[f"log_rmse{suffix}"] = rmse
+            logger.info(
+                f"実測データ結合完了: {len(measured_dfs)} ブロック、"
+                f"log_rmse を {sum(1 for k in all_optical_metrics if k.startswith('log_rmse'))} 条件で計算"
+            )
 
         # Parquet 保存
         if save_parquet:
@@ -248,11 +362,22 @@ def simulate(
                 save_heightmap_png(hm, _surf_png, title=_surf_title, unit="nm")
                 _plot_paths.append(_surf_png)
 
-                # 2D BSDF PNG（手法別）
-                for _mkey, (_u, _v, _b) in method_bsdf.items():
-                    _bsdf_png = _td / f"bsdf_2d_{_mkey}.png"
-                    save_bsdf_2d_png(_u, _v, _b, _bsdf_png, method=_mkey.upper())
-                    _plot_paths.append(_bsdf_png)
+                # 2D BSDF PNG（条件 × 手法別）
+                for _cond_key, _method_data in method_bsdf_by_cond.items():
+                    _wl_um, _theta_i, _mode = _cond_key
+                    _cond_tag = (
+                        ""
+                        if not multi
+                        else (
+                            f"_wl{int(round(_wl_um * 1000))}nm"
+                            f"_aoi{int(round(_theta_i))}"
+                            f"_{_mode.lower()}"
+                        )
+                    )
+                    for _mkey, (_u, _v, _b) in _method_data.items():
+                        _bsdf_png = _td / f"bsdf_2d_{_mkey}{_cond_tag}.png"
+                        save_bsdf_2d_png(_u, _v, _b, _bsdf_png, method=_mkey.upper())
+                        _plot_paths.append(_bsdf_png)
 
                 run_id = ml_logger.log_trial(
                     params, all_metrics, df_combined, plot_paths=_plot_paths

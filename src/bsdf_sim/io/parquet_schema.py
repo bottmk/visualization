@@ -187,37 +187,70 @@ def merge_sim_and_measured(
     sim_df: pd.DataFrame,
     meas_df: pd.DataFrame,
     bsdf_floor: float = 1e-6,
+    tolerance_deg: float = 1.0,
+    tolerance_nm: float = 5.0,
 ) -> pd.DataFrame:
-    """シミュレーション結果と実測データを結合し、Log-RMSE を計算する。
+    """シミュレーション結果と実測データを結合し、条件ごとに Log-RMSE を計算する。
 
-    実測データの UV 座標に最も近いシミュレーション点を補間して比較する。
+    sim_df の各 (method, wavelength_um, theta_i_deg, mode) 組に対して、
+    meas_df 内で tolerance 内に一致するブロックを探し、UV 座標ベースの
+    線形補間で BSDF 値を一致点に持ち込んで Log-RMSE を計算する。
+
+    tolerance 内に実測ブロックが見つからなかった sim 行の log_rmse は
+    既存値（通常 NaN）のまま維持される。
 
     Args:
-        sim_df: シミュレーション結果 DataFrame
-        meas_df: 実測データ DataFrame
+        sim_df: シミュレーション結果 DataFrame（複数条件可）
+        meas_df: 実測データ DataFrame（複数条件可）
         bsdf_floor: ノイズフロア [sr⁻¹]
+        tolerance_deg: sim⇔実測マッチングの入射角許容 [deg]
+        tolerance_nm: sim⇔実測マッチングの波長許容 [nm]
 
     Returns:
-        Log-RMSE が計算された結合 DataFrame
+        sim_df ＋ meas_df を縦結合した DataFrame（sim 行の log_rmse 更新済）
     """
     from scipy.interpolate import griddata
 
     combined = pd.concat([sim_df, meas_df], ignore_index=True)
+    if len(sim_df) == 0 or len(meas_df) == 0:
+        return combined
 
-    # 実測データの UV 座標でシミュレーション値を補間
-    for method in sim_df["method"].unique():
-        method_mask = sim_df["method"] == method
-        sim_sub = sim_df[method_mask]
+    sim_keys = sim_df[["method", "wavelength_um", "theta_i_deg", "mode"]].drop_duplicates()
+    tol_wl_um = tolerance_nm / 1000.0
+
+    for _, row in sim_keys.iterrows():
+        method_val = row["method"]
+        wl = float(row["wavelength_um"])
+        theta_i = float(row["theta_i_deg"])
+        mode_val = row["mode"]
+
+        sim_mask = (
+            (sim_df["method"].values == method_val)
+            & (np.abs(sim_df["wavelength_um"].values - wl) < 1e-6)
+            & (np.abs(sim_df["theta_i_deg"].values - theta_i) < 1e-6)
+            & (sim_df["mode"].values == mode_val)
+        )
+        sim_sub = sim_df[sim_mask]
+
+        meas_mask = (
+            (np.abs(meas_df["wavelength_um"].values - wl) <= tol_wl_um)
+            & (np.abs(meas_df["theta_i_deg"].values - theta_i) <= tolerance_deg)
+            & (meas_df["mode"].values == mode_val)
+        )
+        meas_sub = meas_df[meas_mask]
+
+        if len(sim_sub) == 0 or len(meas_sub) == 0:
+            continue
 
         sim_bsdf_at_meas = griddata(
             points=sim_sub[["u", "v"]].values,
             values=sim_sub["bsdf"].values,
-            xi=meas_df[["u", "v"]].values,
+            xi=meas_sub[["u", "v"]].values,
             method="linear",
             fill_value=0.0,
         )
 
-        meas_bsdf = meas_df["bsdf"].values
+        meas_bsdf = meas_sub["bsdf"].values
         valid_mask = meas_bsdf > bsdf_floor
         if np.any(valid_mask):
             log_sim = np.log10(np.maximum(sim_bsdf_at_meas[valid_mask], bsdf_floor))
@@ -226,7 +259,12 @@ def merge_sim_and_measured(
         else:
             rmse = float("nan")
 
-        # シミュレーション行の log_rmse を更新
-        combined.loc[combined["method"] == method, "log_rmse"] = rmse
+        combined_mask = (
+            (combined["method"].values == method_val)
+            & (np.abs(combined["wavelength_um"].values - wl) < 1e-6)
+            & (np.abs(combined["theta_i_deg"].values - theta_i) < 1e-6)
+            & (combined["mode"].values == mode_val)
+        )
+        combined.loc[combined_mask, "log_rmse"] = rmse
 
     return combined

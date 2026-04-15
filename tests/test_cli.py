@@ -194,3 +194,169 @@ class TestCLISimulateBTDF:
             "--no-log-to-mlflow",
         ])
         assert result.exit_code == 0, result.output
+
+
+# ── 多条件シミュレーション + 実測 BSDF 統合テスト ─────────────────────────────
+
+
+class TestCLIMultiCondition:
+    """1 run 内で多波長・多入射角・BRDF/BTDF を実行する。"""
+
+    def _run(self, cfg, tmp_path, name):
+        config_path = tmp_path / f"{name}.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+        runner = CliRunner()
+        return runner.invoke(cli, [
+            "simulate",
+            "--config", str(config_path),
+            "--output-dir", str(tmp_path / f"out_{name}"),
+            "--method", "fft",
+            "--no-log-to-mlflow",
+        ])
+
+    def _load_result(self, tmp_path, name):
+        from bsdf_sim.io.parquet_schema import load_parquet
+        return load_parquet(tmp_path / f"out_{name}" / "bsdf_data.parquet")
+
+    def test_multi_wavelength(self, tmp_path):
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": [0.465, 0.525, 0.630],
+        }
+        result = self._run(cfg, tmp_path, "multi_wl")
+        assert result.exit_code == 0, result.output
+        df = self._load_result(tmp_path, "multi_wl")
+        wls = df[df["method"] == "FFT"]["wavelength_um"].unique()
+        assert len(wls) == 3
+
+    def test_multi_theta_i(self, tmp_path):
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "theta_i_deg": [0.0, 20.0, 40.0],
+        }
+        result = self._run(cfg, tmp_path, "multi_theta")
+        assert result.exit_code == 0, result.output
+        df = self._load_result(tmp_path, "multi_theta")
+        thetas = df[df["method"] == "FFT"]["theta_i_deg"].unique()
+        assert len(thetas) == 3
+
+    def test_multi_mode_brdf_btdf(self, tmp_path):
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "theta_i_deg": 20.0,
+            "mode": ["BRDF", "BTDF"],
+        }
+        result = self._run(cfg, tmp_path, "multi_mode")
+        assert result.exit_code == 0, result.output
+        df = self._load_result(tmp_path, "multi_mode")
+        modes = df[df["method"] == "FFT"]["mode"].unique()
+        assert set(modes) == {"BRDF", "BTDF"}
+
+    def test_parquet_contains_multiple_conditions(self, tmp_path):
+        """Parquet 保存時に多条件の行が混在して保存される。"""
+        import pandas as pd
+        from bsdf_sim.io.parquet_schema import load_parquet
+
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": [0.465, 0.630],
+            "theta_i_deg": [0.0, 20.0],
+        }
+        config_path = tmp_path / "config_grid.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "simulate",
+            "--config", str(config_path),
+            "--output-dir", str(tmp_path / "out"),
+            "--method", "fft",
+            "--no-log-to-mlflow",
+        ])
+        assert result.exit_code == 0, result.output
+        df = load_parquet(tmp_path / "out" / "bsdf_data.parquet")
+        unique_keys = df[["wavelength_um", "theta_i_deg"]].drop_duplicates()
+        assert len(unique_keys) == 4  # 2 λ × 2 θ
+
+
+class TestCLIMeasuredBsdfReal:
+    """実ファイル統合テスト（sample_inputs 依存）。"""
+
+    from pathlib import Path as _Path
+    SAMPLE = _Path(__file__).parent.parent / "sample_inputs" / "BRDF_BTDF_LightTools.bsdf"
+
+    @pytest.mark.skipif(
+        not SAMPLE.exists(),
+        reason="sample_inputs/BRDF_BTDF_LightTools.bsdf が存在しない",
+    )
+    def test_simulate_with_measured_bsdf_cli_option(self, tmp_path):
+        """--measured-bsdf オプションで実測を読み込み、log_rmse が計算される。"""
+        import pandas as pd
+        from bsdf_sim.io.parquet_schema import load_parquet
+
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["simulation"] = {
+            **_MINIMAL_CONFIG["simulation"],
+            "wavelength_um": 0.525,
+            "theta_i_deg": 20.0,
+            "mode": "BRDF",
+        }
+        config_path = tmp_path / "config_with_meas.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "simulate",
+            "--config", str(config_path),
+            "--output-dir", str(tmp_path / "out"),
+            "--method", "fft",
+            "--measured-bsdf", str(self.SAMPLE),
+            "--no-log-to-mlflow",
+        ])
+        assert result.exit_code == 0, result.output
+
+        df = load_parquet(tmp_path / "out" / "bsdf_data.parquet")
+        # sim + 実測の両方が含まれる
+        assert "FFT" in df["method"].unique()
+        assert "measured" in df["method"].unique()
+        # FFT 行に log_rmse（一致した条件）が入っている
+        fft_rows = df[df["method"] == "FFT"]
+        assert not fft_rows["log_rmse"].dropna().empty
+
+    @pytest.mark.skipif(
+        not SAMPLE.exists(),
+        reason="sample_inputs/BRDF_BTDF_LightTools.bsdf が存在しない",
+    )
+    def test_simulate_match_measured_auto_conditions(self, tmp_path):
+        """--match-measured で実測の 24 条件を自動採用。"""
+        import pandas as pd
+        from bsdf_sim.io.parquet_schema import load_parquet
+
+        cfg = {**_MINIMAL_CONFIG}
+        cfg["measured_bsdf"] = {
+            "path": str(self.SAMPLE),
+            "match_measured": True,
+        }
+        config_path = tmp_path / "config_auto.yaml"
+        config_path.write_text(yaml.dump(cfg), encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, [
+            "simulate",
+            "--config", str(config_path),
+            "--output-dir", str(tmp_path / "out"),
+            "--method", "fft",
+            "--no-log-to-mlflow",
+        ])
+        assert result.exit_code == 0, result.output
+
+        df = load_parquet(tmp_path / "out" / "bsdf_data.parquet")
+        # 3 λ × 4 AOI × 2 mode = 24 ユニーク条件
+        unique = df[df["method"] == "FFT"][
+            ["wavelength_um", "theta_i_deg", "mode"]
+        ].drop_duplicates()
+        assert len(unique) == 24
