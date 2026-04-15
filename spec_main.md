@@ -628,6 +628,9 @@ panel==1.4.2
 | `test_from_config_basic` | from_config の基本動作（config 辞書から生成） |
 | `test_from_config_no_path_raises` | path 未指定で ValueError |
 | `test_from_config_height_unit_nm` | from_config で nm 単位の CSV を読み込み |
+| `TestPaddingFunctions` | 4 パディング方式（zeros/tile/reflect/smooth_tile）の形状・値・dtype 検証 |
+| `TestMeasuredSurfacePadding` | MeasuredSurface.padding 引数の受け入れ・拒否・実動作検証 |
+| `TestDeviceVk6AutoDetect` | DeviceVk6Surface の pixel_size_um / grid_size 自動算出・明示オーバーライド |
 
 #### 9.2.8. CLI コマンドスモークテスト（`tests/test_cli.py`）
 
@@ -640,6 +643,22 @@ panel==1.4.2
 | `test_simulate_saves_parquet` | `--save-parquet` で Parquet ファイルが生成される |
 | `test_simulate_missing_config_fails` | 存在しない config で終了コード≠0 |
 | `test_simulate_btdf_mode` | `theta_i=150°`（BTDF）で正常終了 |
+
+#### 9.2.9. BSDF 実測ファイルリーダー（`tests/test_bsdf_reader.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `TestBuildMeasuredDataframeIsbtdf` | `build_measured_dataframe` の `is_btdf` 引数（None/True/False）の挙動・mode 列・wavelength 変換 |
+| `TestRegistry::test_register_reader_adds_to_registry` | `register_reader` でレジストリに登録される |
+| `TestRegistry::test_read_bsdf_file_uses_can_read` | `can_read()=True` のリーダーが自動選択される |
+| `TestRegistry::test_read_bsdf_file_file_not_found` | 存在しないファイルで FileNotFoundError |
+| `TestRegistry::test_read_bsdf_file_no_reader_raises` | 対応リーダーなしで ValueError |
+| `TestRegistry::test_read_bsdf_file_by_name` | リーダー名指定で読み込み |
+| `TestLightToolsBsdfReaderCanRead` | MiniDiff ヘッダ検出・非対応ファイル・欠損ファイルの判定 |
+| `TestLightToolsBsdfReaderRead` | ブロック数・カラム構成・BRDF/BTDF モード・AOI・波長・行数・BSDF 値・UV 座標 |
+| `TestLightToolsBsdfReaderInvalidFile` | ScatterAzimuth なし・DataBegin なしで ValueError |
+| `TestLoadBsdfReadersPlugin` | プラグインフォルダから自動登録・存在しないフォルダで例外なし |
+| `TestReadBsdfFileWithRealSample` | 実ファイル 24 ブロック・BRDF/BTDF 各 12・行数 91×361×24・非負 BSDF |
 
 ---
 
@@ -841,3 +860,5 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | visualize レポート強化 | bsdf visualize: 1D プロファイル＋2D ヒートマップ（手法別）＋指標テーブルの Panel HTML 出力。simulate --log-to-mlflow: 表面形状 PNG・2D BSDF PNG を artifacts/plots/ に保存 | — |
 | 装置固有 CSV ローダー（プラグイン方式） | custom_surfaces/ に MeasuredSurface サブクラスを置くだけで自動登録。DeviceXyzSurface を実装例として追加。sample_inputs/ にサンプルファイル・config を格納 | `b35813b` |
 | Keyence VK-X シリーズ対応 | DeviceVk6Surface を追加。Shift-JIS・ヘッダからピクセルサイズ・単位を自動取得。sample_inputs/device_vk6_sample.csv・config_device_vk6.yaml を同梱 | `67a1931` |
+| 4 種パディング方式追加 | MeasuredSurface に zeros/tile/reflect/smooth_tile パディングを実装。DeviceVk6Surface の pixel_size_um / grid_size ヘッダ自動算出を実装。テスト 131→172件 | — |
+| BSDF 実測ファイルリーダー（プラグイン方式） | custom_bsdf_readers/ に BaseBsdfFileReader サブクラスを置くだけで自動登録。LightToolsBsdfReader（LightTools/MiniDiff .bsdf）を実装。build_measured_dataframe に is_btdf 引数を追加。テスト 172→213件 | — |

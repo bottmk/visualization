@@ -19,6 +19,14 @@ device_vk6_sample.csv
   - 対応ローダー: custom_surfaces/device_vk6.py (DeviceVk6Surface)
   - 使用 config: sample_inputs/config_device_vk6.yaml
 
+BRDF_BTDF_LightTools.bsdf
+  - LightTools / MiniDiff Software 出力フォーマット（.bsdf）
+  - エンコード: ASCII / UTF-8
+  - ヘッダ: ScatterAzimuth 361（0–360°）、ScatterRadial 91（0–90°）
+  - データ: 24 ブロック（BRDF/BTDF × AOI 4 種 × 波長 3 種）
+  - ブロック構造: AOI/POI/Side/Wavelength/ScatterType/TIS + 361 行 × 91 列タブ区切り BSDF 値
+  - 対応リーダー: custom_bsdf_readers/lightools_bsdf.py (LightToolsBsdfReader)
+
 今後追加予定のフォーマット
 --------------------------
   - 装置ABC フォーマット（*.dat）

@@ -121,6 +121,7 @@ def build_measured_dataframe(
     phi_i_deg: float,
     wavelength_nm: float,
     polarization: str,
+    is_btdf: bool | None = None,
 ) -> pd.DataFrame:
     """実測データから Parquet 用 DataFrame を構築する。
 
@@ -134,6 +135,7 @@ def build_measured_dataframe(
         phi_i_deg: 入射方位角 [deg]
         wavelength_nm: 波長 [nm]（内部で μm に変換）
         polarization: 'S' / 'P' / 'Unpolarized'
+        is_btdf: True → BTDF、False → BRDF、None（デフォルト）→ theta_i_deg > 90° で自動判定
 
     Returns:
         Parquet スキーマ準拠の DataFrame
@@ -145,7 +147,8 @@ def build_measured_dataframe(
     u = (np.sin(theta_s_rad) * np.cos(phi_s_rad)).astype(np.float32)
     v = (np.sin(theta_s_rad) * np.sin(phi_s_rad)).astype(np.float32)
 
-    is_btdf = theta_i_deg > 90.0
+    if is_btdf is None:
+        is_btdf = theta_i_deg > 90.0
     mode = "BTDF" if is_btdf else "BRDF"
     n = len(u)
 
