@@ -730,3 +730,106 @@ $$Q_{s,\text{refl}} = |r_s(\theta_i)|^2, \quad Q_{p,\text{refl}} = |r_p(\theta_i
 $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \cdot |t_p(\theta_i)|^2 \cos^2(\theta_i - \theta_t)$$
 
 **注意**: 簡略形は完全形の近似であり、$\theta_s = 0$ 代入によって完全形から導出されるものではない。
+
+---
+
+## 10. 変更履歴・既知バグ記録
+
+コードの重要な変更・バグ修正を時系列で記録する。git コミット履歴の補足として、**判断の根拠・影響範囲・同種バグの有無**を記述する。
+
+---
+
+### 10.1. バグ修正履歴
+
+#### [BUG-001] フレネル係数 r_p の符号規約 — 修正済み
+- **発見日**: 初期実装レビュー時
+- **影響ファイル**: `src/bsdf_sim/optics/fresnel.py`
+- **症状**: `test_normal_incidence_rp` FAILED。法線入射で `r_p = +0.2`（期待値: `−0.2`）
+- **原因**: Hecht 規約（$r_p = (n_2\cos\theta_i - n_1\cos\theta_t)/(n_2\cos\theta_i + n_1\cos\theta_t)$）を誤って実装。Born-Wolf 規約と符号が逆になっていた。
+- **修正**: Born-Wolf 規約（$r_p = (n_1\cos\theta_t - n_2\cos\theta_i)/(n_1\cos\theta_t + n_2\cos\theta_i)$）に統一。法線入射で $r_p = r_s$ が成立するよう修正（Appendix A.2 参照）。
+- **BSDF への影響**: Q 因子は $|r_p|^2$ 型のため BSDF 数値への影響なし。
+- **対応コミット**: `8d422d1`
+
+---
+
+#### [BUG-002] FFT 軸の非単調性による RegularGridInterpolator エラー — 修正済み
+- **発見日**: 初期実装レビュー時
+- **影響ファイル**: `src/bsdf_sim/optics/fft_bsdf.py` — `sample_bsdf_at_angles()`
+- **症状**: `test_sample_at_angles` FAILED。`ValueError: points must be strictly ascending`
+- **原因**: FFT で得られる周波数軸は `[0, ..., N/2-1, -N/2, ..., -1]` の非単調順。`RegularGridInterpolator` は単調増加を要求するため例外が発生。
+- **修正**: `np.argsort(u_axis)` で軸をソートし、BSDF グリッドを `bsdf[np.ix_(u_sort, v_sort)]` で並び替えてから補間器に渡す。
+- **対応コミット**: `8d422d1`
+
+---
+
+#### [BUG-003] `compute_all_optical_metrics` の enabled デフォルト値 — 修正済み
+- **発見日**: `bsdf simulate` で sparkle をコメントアウトしても停止する問題の調査中
+- **影響ファイル**: `src/bsdf_sim/metrics/optical.py`
+- **症状**: YAML で `haze` / `gloss` / `doi` / `sparkle` セクションをコメントアウトしても、該当指標が実行され続ける（sparkle は後述 BUG-004 により実質フリーズ）。
+- **原因**: `cfg.get("sparkle", {}).get("enabled", True)` のパターン。セクションが欠落すると `{}` にフォールバックし、`enabled` のデフォルト `True` が適用されていた。全4指標に同一のバグが存在。
+- **修正**: セクションの存在を先に確認する2段階チェックに変更。
+  ```python
+  # 修正前（バグ）
+  if cfg.get("sparkle", {}).get("enabled", True):
+
+  # 修正後
+  sparkle_cfg = cfg.get("sparkle")
+  if sparkle_cfg is not None and sparkle_cfg.get("enabled", True):
+  ```
+- **影響指標**: haze, gloss, doi, sparkle の全4指標（同種バグ）。
+- **対応コミット**: `d22ae09`
+
+---
+
+#### [BUG-004] `compute_sparkle` の計算量が天文学的なループ数 — 修正済み
+- **発見日**: BUG-003 調査中（`bsdf simulate` が FFT 完了後に無応答になる根本原因）
+- **影響ファイル**: `src/bsdf_sim/metrics/optical.py` — `_compute_sparkle_single()`
+- **症状**: smartphone プリセットで `bsdf simulate` が FFT 完了後に数時間フリーズ。
+- **原因**: 画素の反復方向（全 UV 半球を画素サイズで分割）でループを設計していた。
+  ```
+  sin_half ≈ 0.0001033（smartphone: pixel=0.062mm, distance=300mm）
+  n_pix_u = int(1.0 / 0.0001033) = 9,680
+  ループ数: (2×9680+1)² ≈ 3.7億回
+  各ループで 512×512 マスク演算 → 実質無限
+  ```
+- **修正**: 逆方向の発想（各グリッド点が属する画素を求める）でベクトル化。
+  ```python
+  pix_u = np.round(u_grid / (2 * sin_half)).astype(np.int32)
+  pix_v = np.round(v_grid / (2 * sin_half)).astype(np.int32)
+  _, inverse = np.unique(pixel_key, return_inverse=True)
+  return np.bincount(inverse, weights=power_flat)
+  ```
+  計算量 O(N²) → 0.013s（旧実装: 数時間）。
+- **対応コミット**: `d22ae09`
+
+---
+
+#### [BUG-005] `dynamicmap.py` の lru_cache リサイズが無効 — 修正済み
+- **発見日**: Phase A 監査時
+- **影響ファイル**: `src/bsdf_sim/visualization/dynamicmap.py`
+- **症状**: `cache_size` パラメータを変更してもキャッシュサイズが変わらない。
+- **原因**: `_cached_bsdf.__wrapped__` に新しい lru_cache を代入しても、`_cached_bsdf` 本体は元の `maxsize=256` のまま。`__wrapped__` は参照用属性であり、上書きしても呼び出し経路は変わらない。
+- **修正**: 生の計算関数 `_compute_bsdf_raw()` を分離し、`__init__` でインスタンスごとに `functools.lru_cache(maxsize=cache_size)(_compute_bsdf_raw)` を生成して `self._cached_bsdf` に保持。
+- **対応コミット**: `90f352e`
+
+---
+
+#### [BUG-006] `cli/main.py` で `--method psd` 実行時に NameError — 修正済み
+- **発見日**: Phase A 監査時
+- **影響ファイル**: `src/bsdf_sim/cli/main.py`
+- **症状**: `bsdf simulate --method psd` で `NameError: name 'bsdf_fft' is not defined`
+- **原因**: `u_primary / bsdf_primary` の追跡変数がなく、`method='psd'` の場合に FFT 変数（`bsdf_fft`）を参照するコードパスが存在していた。
+- **修正**: `u_primary, v_primary, bsdf_primary = None` を明示的に初期化し、FFT/PSD ブロックそれぞれで代入するよう変更。
+- **対応コミット**: `90f352e`
+
+---
+
+### 10.2. 仕様変更履歴
+
+| 日付 | 変更内容 | 対応コミット |
+|---|---|---|
+| 初期実装 | Python パッケージ全体・テスト 53件 | `8d422d1` |
+| JIS/ISO 形状指標追加 | ISO 25178-2 S-パラメータ 11項目・JIS B 0601 R-パラメータ 9項目 | `27331e6` |
+| spec/README 更新 | 形状指標仕様を spec_main.md Section 5.1・README に反映 | `4a7f9af` |
+| Phase A〜D 修正一括 | BUG-005/006・to_bsdf_2d()・from_config()・sparkle RGB加重・テスト 76→131件 | `90f352e`, `a508446` |
+| BUG-003/004 修正 | enabled デフォルト値バグ（4指標）・sparkle ベクトル化・プログレスバー追加 | `d22ae09` |
