@@ -253,12 +253,21 @@ CSV は数値のみのカンマ区切り行列形式を想定。
 
 `MeasuredSurface` のサブクラスを `custom_surfaces/<name>.py` に実装すると自動登録される。
 
+同梱されている実装例:
+
+| クラス名 | ファイル | 対象装置 | 特徴 |
+|---|---|---|---|
+| `DeviceXyzSurface` | `custom_surfaces/device_xyz.py` | 装置XYZ（参考実装） | タブ区切り・5行ヘッダ・nm単位 |
+| `DeviceVk6Surface` | `custom_surfaces/device_vk6.py` | Keyence VK-X シリーズ | Shift-JIS・ピクセルサイズ/単位をヘッダから自動取得 |
+
 ```yaml
+# Keyence VK-X シリーズの例
 surface:
-  model: 'DeviceXyzSurface'   # custom_surfaces/device_xyz.py が自動ロードされる
+  model: 'DeviceVk6Surface'   # custom_surfaces/device_vk6.py が自動ロードされる
   measured:
-    path: 'sample_inputs/device_xyz_sample.csv'
-    source_pixel_size_um: 0.5
+    path: 'sample_inputs/device_vk6_sample.csv'
+    # source_pixel_size_um は省略可（ヘッダから自動取得）
+    leveling: true
 ```
 
 サンプルファイルと設定例は `sample_inputs/` フォルダを参照。
@@ -464,7 +473,7 @@ surface:
   model: 'MySurface'   # または 'MyDeviceSurface'
 ```
 
-実装例として `custom_surfaces/device_xyz.py`（`DeviceXyzSurface`）が同梱されている。  
+同梱の実装例: `DeviceXyzSurface`（参考実装）、`DeviceVk6Surface`（Keyence VK-X シリーズ）  
 サンプルファイルと動作確認用 config は `sample_inputs/` を参照。
 
 ### カスタム評価指標の追加

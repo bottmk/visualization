@@ -6,10 +6,18 @@ sample_inputs/ — 入力ファイルサンプル集
 ファイル一覧
 ------------
 device_xyz_sample.csv
-  - 装置XYZ 固有フォーマット
+  - 装置XYZ 固有フォーマット（参考実装用）
   - タブ区切り、先頭5行ヘッダ、高さ単位 nm、グリッド 100×100
   - 対応ローダー: custom_surfaces/device_xyz.py (DeviceXyzSurface)
   - 使用 config: sample_inputs/config_device_xyz.yaml
+
+device_vk6_sample.csv
+  - Keyence VK-X シリーズ（VK-6000/VK-X1000 等）出力フォーマット
+  - エンコード: Shift-JIS
+  - ヘッダ 15 行（ピクセルサイズ・単位をヘッダから自動取得）
+  - グリッド: 2048×1536、ピクセルサイズ: 0.136 μm、高さ単位: μm
+  - 対応ローダー: custom_surfaces/device_vk6.py (DeviceVk6Surface)
+  - 使用 config: sample_inputs/config_device_vk6.yaml
 
 今後追加予定のフォーマット
 --------------------------
