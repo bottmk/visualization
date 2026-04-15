@@ -197,6 +197,178 @@ def create_scale_toggle_panel(
     )
 
 
+def plot_heightmap(
+    hm: "HeightMap",
+    title: str = "表面形状",
+    colormap: str = "RdYlBu_r",
+    unit: str = "nm",
+) -> Any:
+    """高さマップを 2D カラーマップ・ヒストグラム・断面プロファイルで可視化する。
+
+    Args:
+        hm: HeightMap オブジェクト
+        title: タイトル
+        colormap: カラーマップ名（Bokeh/Matplotlib 互換）
+        unit: 表示単位 'nm' または 'um'
+
+    Returns:
+        HoloViews Layout（2D マップ + ヒストグラム + X/Y 断面）
+    """
+    _check_holoviews()
+
+    scale = 1000.0 if unit == "nm" else 1.0
+    unit_label = f"[{unit}]"
+
+    data = hm.data.astype(np.float64) * scale  # μm → 表示単位
+    N = hm.grid_size
+    phys = hm.physical_size_um  # μm
+
+    x_axis = np.linspace(0, phys, N)
+    y_axis = np.linspace(0, phys, N)
+
+    # ── 2D カラーマップ ───────────────────────────────────────────────────────
+    img = hv.Image(
+        (x_axis, y_axis, data.T),
+        kdims=["x [μm]", "y [μm]"],
+        vdims=[f"高さ {unit_label}"],
+    ).opts(
+        title=title,
+        width=480,
+        height=460,
+        colorbar=True,
+        cmap=colormap,
+        aspect="equal",
+        toolbar="above",
+    )
+
+    # ── 高さ分布ヒストグラム ──────────────────────────────────────────────────
+    counts, edges = np.histogram(data.ravel(), bins=80)
+    hist = hv.Histogram(
+        (edges, counts),
+        kdims=[f"高さ {unit_label}"],
+        vdims=["頻度"],
+    ).opts(
+        title="高さ分布",
+        width=280,
+        height=220,
+        color="steelblue",
+        alpha=0.8,
+        toolbar=None,
+    )
+
+    # ── X 断面プロファイル（y 中心） ──────────────────────────────────────────
+    mid = N // 2
+    prof_x = hv.Curve(
+        (x_axis, data[:, mid]),
+        kdims=["x [μm]"],
+        vdims=[f"高さ {unit_label}"],
+    ).opts(
+        title=f"断面プロファイル（y={phys/2:.1f}μm）",
+        width=480,
+        height=200,
+        color="royalblue",
+        line_width=1.2,
+        toolbar=None,
+    )
+
+    # ── Y 断面プロファイル（x 中心） ──────────────────────────────────────────
+    prof_y = hv.Curve(
+        (y_axis, data[mid, :]),
+        kdims=["y [μm]"],
+        vdims=[f"高さ {unit_label}"],
+    ).opts(
+        title=f"断面プロファイル（x={phys/2:.1f}μm）",
+        width=280,
+        height=200,
+        color="tomato",
+        line_width=1.2,
+        toolbar=None,
+    )
+
+    # ── レイアウト組み立て ────────────────────────────────────────────────────
+    layout = (img + hist + prof_x + prof_y).cols(2).opts(
+        title=title,
+    )
+    return layout
+
+
+def save_heightmap_png(
+    hm: "HeightMap",
+    path: str | Path,
+    title: str = "表面形状",
+    colormap: str = "RdYlBu_r",
+    unit: str = "nm",
+    dpi: int = 150,
+) -> None:
+    """高さマップを PNG ファイルとして保存する（matplotlib 使用）。
+
+    Args:
+        hm: HeightMap オブジェクト
+        path: 保存先パス
+        title: タイトル
+        colormap: matplotlib カラーマップ名
+        unit: 表示単位 'nm' または 'um'
+        dpi: 解像度
+    """
+    import matplotlib
+    matplotlib.use("Agg")  # ヘッドレス環境でも動作
+    import matplotlib.pyplot as plt
+    from matplotlib.gridspec import GridSpec
+
+    scale = 1000.0 if unit == "nm" else 1.0
+    unit_label = unit
+    data = hm.data.astype(np.float64) * scale
+    N = hm.grid_size
+    phys = hm.physical_size_um
+
+    x_axis = np.linspace(0, phys, N)
+    y_axis = np.linspace(0, phys, N)
+
+    fig = plt.figure(figsize=(12, 9))
+    rq_nm = float(np.sqrt(np.mean((hm.data - hm.data.mean()) ** 2))) * 1000
+    fig.suptitle(
+        f"{title}  (grid={N}x{N}, pixel={hm.pixel_size_um}um, Rq={rq_nm:.2f}nm)",
+        fontsize=12,
+    )
+    gs = GridSpec(2, 3, figure=fig, hspace=0.38, wspace=0.38)
+
+    # 2D color map
+    ax_map = fig.add_subplot(gs[:, :2])
+    im = ax_map.imshow(
+        data.T,
+        origin="lower",
+        extent=[0, phys, 0, phys],
+        cmap=colormap,
+        aspect="equal",
+    )
+    ax_map.set_xlabel("x [um]")
+    ax_map.set_ylabel("y [um]")
+    ax_map.set_title(f"Height map [{unit_label}]")
+    plt.colorbar(im, ax=ax_map, label=f"Height [{unit_label}]", fraction=0.046)
+
+    # Height histogram
+    ax_hist = fig.add_subplot(gs[0, 2])
+    ax_hist.hist(data.ravel(), bins=80, color="steelblue", alpha=0.8, edgecolor="none")
+    ax_hist.set_xlabel(f"Height [{unit_label}]")
+    ax_hist.set_ylabel("Count")
+    ax_hist.set_title("Height distribution")
+
+    # X/Y cross-section profiles
+    ax_px = fig.add_subplot(gs[1, 2])
+    mid = N // 2
+    ax_px.plot(x_axis, data[:, mid], color="royalblue", linewidth=0.8, label="X profile")
+    ax_px.plot(y_axis, data[mid, :], color="tomato",    linewidth=0.8, label="Y profile")
+    ax_px.set_xlabel("[um]")
+    ax_px.set_ylabel(f"Height [{unit_label}]")
+    ax_px.set_title(f"Cross-section (center)")
+    ax_px.legend(fontsize=8)
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(path, dpi=dpi, bbox_inches="tight")
+    plt.close(fig)
+
+
 def save_html(plot: Any, path: str | Path, title: str = "BSDF Report") -> None:
     """HoloViews / Panel オブジェクトを HTML ファイルとして保存する。
 

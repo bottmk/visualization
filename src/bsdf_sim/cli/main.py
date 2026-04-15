@@ -223,6 +223,63 @@ def simulate(
     logger.info("シミュレーション完了。")
 
 
+# ── surface ───────────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.option("--config", "-c", required=True, type=click.Path(exists=True), help="設定ファイルパス（YAML）")
+@click.option("--output", "-o", default=None, help="出力ファイルパス（省略時: surface.html または surface.png）")
+@click.option("--format", "fmt", default="html", type=click.Choice(["html", "png"]), show_default=True, help="出力形式")
+@click.option("--unit", default="nm", type=click.Choice(["nm", "um"]), show_default=True, help="高さの表示単位")
+@click.option("--colormap", default="RdYlBu_r", show_default=True, help="カラーマップ名")
+def surface(
+    config: str,
+    output: str | None,
+    fmt: str,
+    unit: str,
+    colormap: str,
+) -> None:
+    """表面形状を 2D カラーマップ・ヒストグラム・断面プロファイルで可視化する。"""
+    from ..io.config_loader import BSDFConfig
+    from ..models import create_model_from_config, load_plugins
+    from ..metrics.surface import compute_all_surface_metrics
+    from ..visualization.holoviews_plots import plot_heightmap, save_heightmap_png, save_html
+
+    cfg = BSDFConfig.from_file(config)
+    load_plugins()
+
+    out_path = output or f"surface.{fmt}"
+
+    t0 = time.perf_counter()
+    logger.info(f"[1/2] 高さマップ生成中... (grid={cfg.surface.get('grid_size', 4096)})")
+    model = create_model_from_config(cfg._resolved)
+    hm = model.get_height_map()
+    logger.info(f"      完了 ({_elapsed(t0)})  {hm.grid_size}×{hm.grid_size}, pixel={hm.pixel_size_um}μm")
+
+    # 表面形状指標を計算してタイトルに埋め込む
+    surface_metrics = compute_all_surface_metrics(hm, verbose=True)
+    sq_nm = surface_metrics["sq_um"] * 1000
+    sa_nm = surface_metrics["sa_um"] * 1000
+    model_name = cfg.surface.get("model", "")
+    plot_title = f"{model_name}  Sq={sq_nm:.2f}nm  Sa={sa_nm:.2f}nm"
+
+    logger.info(f"[2/2] 可視化出力中... ({fmt} → {out_path})")
+    t0 = time.perf_counter()
+
+    if fmt == "png":
+        save_heightmap_png(
+            hm, path=out_path,
+            title=plot_title,
+            colormap=colormap,
+            unit=unit,
+        )
+    else:
+        import panel as pn
+        layout = plot_heightmap(hm, title=plot_title, colormap=colormap, unit=unit)
+        save_html(layout, out_path)
+
+    logger.info(f"      完了 ({_elapsed(t0)})  保存先: {out_path}")
+
+
 # ── optimize ──────────────────────────────────────────────────────────────────
 
 @cli.command()
