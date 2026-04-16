@@ -621,4 +621,4 @@ pytest tests/test_fft_bsdf.py -v
 
 ## ライセンス
 
-本リポジトリのライセンスについてはリポジトリオーナーに確認すること。
+[MIT License](LICENSE) © 2025 bottmk
