@@ -30,11 +30,35 @@ dynamicmap:       # プレビュー設定
 ```
 
 ### 0.3. CLI インターフェース
+
+現時点で実装されている 7 個のコマンド:
+
 ```bash
-bsdf simulate  --config config.yaml                  # シミュレーション単体実行
+# シミュレーション・形状生成
+bsdf simulate  --config config.yaml                  # BSDF シミュレーション単体実行
+                                                     # --log-to-mlflow で MLflow に記録
+                                                     #   （surface.html / bsdf_report.html も自動生成）
+                                                     # --measured-bsdf file.bsdf で実測データと比較
+bsdf surface   --config config.yaml --format html    # 表面形状の可視化（PNG / HTML）
+
+# 最適化
 bsdf optimize  --config config.yaml --trials 100     # Optuna 最適化実行
-bsdf visualize --run-id <mlflow_run_id>              # 結果可視化
+
+# リアルタイム対話
+bsdf dashboard --config config.yaml --port 5006      # Panel ダッシュボード起動
+                                                     #  surface.model に応じて
+                                                     #  RandomRough / SphericalArray / Measured
+                                                     #  のいずれかを起動
+
+# MLflow ブラウズ・可視化
+bsdf runs list --sort-by haze_fft --limit 10         # run 一覧をメトリクス順で表示
+bsdf visualize --run-id <id|latest|best:METRIC>      # 1 Run から BSDF レポート生成
+                                                     #  --run-id は完全 ID / latest / latest-N
+                                                     #  / best:METRIC[:max] / 8 文字プレフィックス可
+                                                     #  --log-to-mlflow で元 run の
+                                                     #  artifacts/plots/ に HTML 書き戻し
 bsdf report    --run-ids <id1>,<id2>                 # 複数 Run の比較レポート生成
+                                                     #  --log-to-mlflow で 02_Analysis_Reports に記録
 ```
 
 ---
@@ -413,9 +437,9 @@ optuna:
 
 ### 6.2. MLflowによる一元管理ルール
 プロジェクトの肥大化を防ぐため、Experiment（実験）を以下の順序で階層管理する。
-1. **01_BSDF_Raw_Data（データ貯蔵庫）**: 1 Run = 1 形状。Optunaの各Trialのパラメータ、メトリクス（各種評価指標）、および生データ（Parquet、2Dヒートマップ）をArtifactとして保存する。
-2. **02_Analysis_Reports（比較レポート）**: 1 Run = 1 解析タスク。複数の形状データを引き出して重ね合わせたインタラクティブなBSDF比較グラフ（HTML）を保存する。
-3. **03_GenAI_Insights（AI考察）**: LLMを用いて、測定値やメトリクスに基づく設計改善の考察レポートを自動生成・記録する。
+1. **01_BSDF_Raw_Data（データ貯蔵庫）** ✅ 実装済み: 1 Run = 1 形状。Optunaの各Trialのパラメータ、メトリクス（各種評価指標）、および生データ（Parquet、2Dヒートマップ、インタラクティブ HTML）をArtifactとして保存する。`RawDataLogger` クラスで実装。`simulate --log-to-mlflow` 時に surface.png/html、bsdf_2d_*.png、bsdf_report.html を自動生成して記録。
+2. **02_Analysis_Reports（比較レポート）** ✅ 実装済み: 1 Run = 1 解析タスク。複数の形状データを引き出して重ね合わせたインタラクティブなBSDF比較グラフ（HTML）を保存する。`AnalysisLogger` クラスで実装。`bsdf report --log-to-mlflow` 時に source_run_ids と comparison_report.html を記録。
+3. **03_GenAI_Insights（AI考察）** ⚠️ **未実装・構想段階**: LLMを用いて、測定値やメトリクスに基づく設計改善の考察レポートを自動生成・記録する。現状は `EXPERIMENT_GENAI = "03_GenAI_Insights"` の定数のみ `optimization/mlflow_logger.py` に定義されており、`GenAILogger` クラスおよびロジックは未実装。Section 11 の TODO 参照。
 
 **Parquet スキーマ（01_BSDF_Raw_Data）:**
 
@@ -1026,3 +1050,68 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 | simulate の MLflow 記録に HTML artifacts 追加 | `bsdf simulate --log-to-mlflow` が `plots/surface.html`（plot_heightmap）と `plots/bsdf_report.html`（plot_bsdf_report・多条件 Tabs・実測オーバーレイ込み）を自動生成して run artifacts に保存。MLflow UI の artifacts タブから HTML をクリックすると新タブで Bokeh インタラクティブ表示される。PNG は従来通りインライン表示可能。HTML 生成失敗時は警告のみで PNG は記録される（graceful degradation）。テスト 286→287件 | — |
 | visualize の MLflow 書き戻し機能 | `bsdf visualize --run-id <id> --log-to-mlflow` で生成した HTML を元 run の `artifacts/plots/` に追記アップロードする機能を追加（`MlflowClient.log_artifact` 使用）。optimize で大量の run を生成し、後から気になる run を選んで HTML を生成 → MLflow UI でクリック閲覧するワークフロー。optimize は従来通り HTML を生成しない（Parquet + metrics のみ）、visualize が必要な run にだけ後追いで生成する設計。テスト 287→289件 | — |
 | run_id 解決ヘルパー＋`bsdf runs list` サブコマンド | 長い run_id の入力を不要にする 3 つの仕組み: (1) `bsdf runs list --sort-by METRIC --limit N` で short_id + メトリクス + 開始時刻をテーブル表示（`rich` 依存なしのプレーンテキスト整形）、(2) `visualize --run-id` が `latest` / `latest-N` / `best:METRIC[:max]` / 8 文字以上のプレフィックスを完全な run_id に自動解決（`resolve_run_id()` ヘルパー）、(3) 旧形式の完全 run_id もそのまま通る。`list_runs()` / `resolve_run_id()` を `optimization/mlflow_logger.py` に追加。テスト 289→311件 | — |
+
+---
+
+## 11. TODO / 未着手課題
+
+現時点で仕様書または過去の設計相談で言及されているが、**未実装**の項目。
+新規実装や優先度の相談はここから拾う。項目を完了したら該当エントリを削除
+または「実装済み」と明記してSection 10.2 の仕様変更履歴に移動する。
+
+### 11.1. 仕様書で言及されているが未実装の機能
+
+| 項目 | 概要 | 関連仕様 | 優先度 |
+|---|---|---|---|
+| **03_GenAI_Insights 実験** | LLM による測定値・メトリクスに基づく設計改善考察レポートの自動生成。`EXPERIMENT_GENAI` 定数のみ定義済み、`GenAILogger` クラスと LLM 呼び出しロジックは未実装 | Section 6.2 | 低 |
+| **DynamicMap プレビューモード連携** | `reduced_area` / `reduced_resolution` のプレビューモード（`get_preview_height_map()` のモード引数）を dashboard から選べるようにする。現状は常に `reduced_area` 固定 | Section 7 / `models/base.py:115` | 低 |
+| **Parquet 往復テスト** | 保存 → 読み込みでデータが一致するかの回帰テスト | Section 9.4 の「未テスト項目」| 中 |
+
+### 11.2. 設計相談で検討したが未実装の機能
+
+以下は過去の設計相談セッションで選択肢として提示され、ユーザーが「保留」「後回し」と判断した項目。
+
+#### 光学指標・規格対応
+
+| 項目 | 概要 | 判断 |
+|---|---|---|
+| **Adding-Doubling 多条件対応** | 現状は多条件 simulate 実行時でも Adding-Doubling は最初の 1 条件にのみ適用される（`cli/main.py` で警告ログ出力）。全条件で多層 BSDF を計算するには simulate ループ内で `MultiLayerBSDF` を繰り返し呼ぶ。`precision='high'` で 1 条件あたり数十秒〜数分のため、opt-in オプション（`--multilayer-all-conditions` 等）での導入推奨 | 用途出現まで保留 |
+| **CIE 輝度加重合成 Haze/Gloss/DOI** | 現状は代表波長 1 つで近似（Section 5.3）。将来的には 3 波長 × CIE V(λ) 加重の `haze_fft_photopic` / `gloss_fft_photopic` / `doi_fft_photopic` サフィックス付きバリアントを追加することで、より規格に近い単一値が得られる | 案 2 として相談済み・保留 |
+| **完全スペクトル積分モード** | `simulation.illuminant: 'D65' / 'C' / 'A'` 等を指定すると 11 波長自動サンプリング + CIE V(λ) 積分で Haze/Gloss/DOI を計算。計算時間が 5〜10 倍になるため重い案件用 | 案 3 として相談済み・保留 |
+| **Sparkle RGB 合成の再導入** | 旧 `bsdf_per_wavelength` + CIE 輝度加重分岐は dead code として削除済み。必要であれば `sparkle.rgb_combine: true` オプションで復活し、多波長 simulate 時に `sparkle_fft_photopic` として記録する設計が可能 | 削除済み・復活は需要次第 |
+
+#### Dashboard 機能拡張
+
+| 項目 | 概要 |
+|---|---|
+| **多条件スライダー** | `wavelength_um` / `theta_i_deg` / `mode` をスライダーまたはセレクタで対話的に切替。現状は config.yaml の値で固定 |
+| **指標リアルタイム表示** | Haze / Gloss / DOI / Sparkle の計算値をスライダー更新に合わせて即時表示 |
+| **Parquet ダウンロードボタン** | 現在の条件で計算した BSDF を Parquet としてダウンロード |
+| **複数モデル並置比較** | 2 つの RandomRough パラメータセット、または RandomRough vs SphericalArray を左右に並べて比較 |
+| **MeasuredSurface パディングセレクタ** | `DeviceVk6Surface` 等で `padding: 'tile' / 'zeros' / 'reflect' / 'smooth_tile'` を UI から切替 |
+
+#### CLI / UI 拡張
+
+| 項目 | 概要 |
+|---|---|
+| **インタラクティブ run ピッカー** | `bsdf visualize --pick` で矢印キー選択（`questionary` 依存）。非 tty 環境で動かない制約があるため `bsdf runs list` + ショートカット記法で代替中 |
+| **MLflow リバースプロキシ** | `bsdf mlflow-proxy --port 5001` で MLflow UI の artifact クリック時に HTML を lazy 生成・キャッシュ。一度生成した後は次回から直接配信。現状は `simulate --log-to-mlflow` で事前生成、または `visualize --log-to-mlflow` で手動書き戻しで代替 |
+| **`bsdf surface --log-to-mlflow`** | surface コマンド単独で 01_BSDF_Raw_Data に run を作成し、surface plot を artifact として保存。現状は simulate 経由でのみ記録される |
+| **visualize で surface.html 再生成** | 現状 `visualize --log-to-mlflow` は `plots/bsdf_report.html` のみ書き戻す。surface 形状も params から再構成して `plots/surface.html` を一緒に生成する拡張が可能 |
+
+#### テスト・品質
+
+| 項目 | 概要 |
+|---|---|
+| **DynamicMap 実サーブテスト** | 現状 `pn.serve()` を呼ぶとハングするためスキップしている。プロセス起動 + HTTP 疎通テスト（requests ライブラリ経由）の追加 |
+| **Adding-Doubling 数値検証** | Section 9.4 で「単層 = 表面のみ計算と一致するか」の検証が未実装として記録されている |
+| **Sparkle RGB 多波長モードの数値検証** | Section 9.4 で未実装と記録（ただし 該当コード自体が削除されたため項目ごと不要な可能性あり） |
+| **Optuna 最適化収束テスト** | Section 9.4 で「既知パラメータへの収束確認」が未実装として記録されている |
+
+### 11.3. 優先度の目安
+
+- **高**: Parquet 往復テスト（データ完全性に関わる）
+- **中**: Adding-Doubling 多条件対応、DynamicMap 実サーブテスト
+- **低**: 03_GenAI_Insights、CIE スペクトル積分モード、インタラクティブ run ピッカー、MLflow リバースプロキシ
+
+新規項目が発生したら必ず本セクションに追記する。実装が完了したら Section 10.2 の変更履歴テーブルに移し、本セクションから削除する。
