@@ -179,13 +179,20 @@ bsdf dashboard [オプション]
 オプション:
   -c, --config PATH             設定ファイルパス（YAML）    [必須]
   -p, --port INTEGER            Panel サーバーポート        [デフォルト: 5006]
+  --host TEXT                   バインドアドレス            [デフォルト: localhost]
+                                0.0.0.0 で全インターフェース公開（他PCからアクセス可）
   --preview-grid INTEGER        プレビュー計算グリッドサイズ [デフォルト: 512]
   --no-browser                  起動時にブラウザを開かない
 ```
 
 ```bash
-# RandomRoughSurface のパラメータ探索
+# ローカルのみ（デフォルト）
 bsdf dashboard --config config.yaml
+
+# 他PCからもアクセス可能にする（ファイアウォールで 5006 番を開放すること）
+bsdf dashboard --config config.yaml --host 0.0.0.0
+
+# ブラウザから: http://<サーバのIPアドレス>:5006
 
 # Keyence VK-X 実測形状 + LightTools 実測 BSDF 比較
 bsdf dashboard --config sample_inputs/config_device_vk6.yaml

@@ -234,10 +234,31 @@ class _BaseBSDFDashboard(ABC):
     def create_dashboard(self) -> Any:
         """サブクラスが UI を組み立てて Panel Layout を返す。"""
 
-    def serve(self, port: int = 5006, show: bool = True, **kwargs: Any) -> None:
-        """ダッシュボードをローカルサーバーで起動する。"""
+    def serve(
+        self,
+        port: int = 5006,
+        show: bool = True,
+        address: str = "localhost",
+        **kwargs: Any,
+    ) -> None:
+        """ダッシュボードをサーバーで起動する。
+
+        Args:
+            address: バインドするアドレス（"0.0.0.0" で全インターフェース公開）
+        """
         dashboard = self.create_dashboard(**kwargs)
-        pn.serve(dashboard, port=port, show=show)
+        websocket_origin: str | list[str]
+        if address in ("0.0.0.0", ""):
+            websocket_origin = "*"
+        else:
+            websocket_origin = f"{address}:{port}"
+        pn.serve(
+            dashboard,
+            port=port,
+            show=show,
+            address=address,
+            websocket_origin=websocket_origin,
+        )
 
 
 # ── キャッシュ付き計算（RandomRough 用 / Spherical 用）──────────────────────
