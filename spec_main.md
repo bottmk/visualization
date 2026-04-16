@@ -1025,6 +1025,14 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 - **修正**: `u_primary, v_primary, bsdf_primary = None` を明示的に初期化し、FFT/PSD ブロックそれぞれで代入するよう変更。
 - **対応コミット**: `90f352e`
 
+#### [BUG-007] `dashboard` で BSDF が常に 0 / スライダー無反応 — 修正済み
+- **発見日**: 2026-04-16（ユーザー実行時）
+- **影響ファイル**: `src/bsdf_sim/visualization/dynamicmap.py`
+- **症状**: `bsdf dashboard --config config.yaml` を起動すると BSDF=0 のまま。スライダーを動かしても変化しない。
+- **原因**: `_make_1d_overlay` 内で phi=0 スライスを `bsdf[:, u.shape[1]//2]`（= 列インデックス N//2）で取得していた。`fftfreq` では N//2 が Nyquist 周波数に対応し、方向余弦 v = -1.1 等（|v|>1, 半球外）になるため `valid_mask=False`、bsdf=0 固定になっていた。
+- **修正**: phi=0 スライスを `bsdf[:, 0]`（fftfreq の index=0 が v=0）に変更。
+- **対応コミット**: `152eec7`
+
 ---
 
 ### 10.2. 仕様変更履歴
