@@ -198,6 +198,15 @@ bsdf dashboard --config config.yaml --host 0.0.0.0
 bsdf dashboard --config sample_inputs/config_device_vk6.yaml
 ```
 
+**ファイアウォール設定（他PCからアクセスする場合）:**
+
+| OS | コマンド / 手順 |
+|---|---|
+| Linux (ufw) | `sudo ufw allow 5006` |
+| Linux (firewalld) | `sudo firewall-cmd --add-port=5006/tcp --permanent && sudo firewall-cmd --reload` |
+| Windows | 「Windows Defender ファイアウォール」→「受信の規則」→「新しい規則」→ ポート 5006 (TCP) を許可 |
+| macOS | 「システム設定」→「ネットワーク」→「ファイアウォール」→ bsdf-sim を許可（または `pfctl` で 5006 を開放） |
+
 対応モデル: `RandomRoughSurface` / `SphericalArraySurface` / `MeasuredSurface` 系（`DeviceVk6Surface` 等）
 
 ---
