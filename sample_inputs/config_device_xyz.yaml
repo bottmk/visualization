@@ -1,5 +1,23 @@
 # 装置XYZ フォーマット使用時の config.yaml サンプル
-# bsdf simulate --config sample_inputs/config_device_xyz.yaml -m fft で実行
+#
+# custom_surfaces/device_xyz.py のローダー実装例に対応する最小 config。
+# sample_inputs/device_xyz_sample.csv を入力形状として使用する。
+#
+# ── CLI 使用例 ──────────────────────────────────────────────────────────────
+#
+# (1) FFT で simulate（Parquet 出力のみ）
+#     bsdf simulate --config sample_inputs/config_device_xyz.yaml -m fft
+#
+# (2) MLflow に記録（surface.png / bsdf_2d_*.png / bsdf_report.html が artifacts に）
+#     bsdf simulate --config sample_inputs/config_device_xyz.yaml \
+#                   -m fft --log-to-mlflow
+#
+# (3) 表面形状の確認
+#     bsdf surface --config sample_inputs/config_device_xyz.yaml \
+#                  --format png -o xyz_surface.png --unit nm
+#
+# (4) dashboard で形状を表示（実測形状系なのでスライダーは無し）
+#     bsdf dashboard --config sample_inputs/config_device_xyz.yaml
 
 simulation:
   wavelength_um: 0.55

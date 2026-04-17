@@ -3,6 +3,7 @@
 # このファイルは `bsdf simulate --log-to-mlflow` で生成される
 # artifact 種類を全て網羅するためのサンプル。
 #
+# 生成される artifact:
 #   data/bsdf_data.parquet
 #   plots/surface.png
 #   plots/surface.html
@@ -11,11 +12,31 @@
 #   plots/bsdf_2d_ml_wl<nm>nm_aoi<deg>_<mode>.png   ← 多層合成（adding_doubling）
 #   plots/bsdf_report.html                          ← 実測オーバーレイ込み
 #
-# 実行例:
-#   bsdf simulate --config sample_inputs/config_all_artifacts.yaml -m both --log-to-mlflow
+# ── CLI 使用例 ──────────────────────────────────────────────────────────────
 #
-# 計算時間の目安（precision=fast、grid_size=1024）: 数分〜10 分程度。
-# grid_size を 2048 以上 / precision=standard にすると多層合成が支配的で数倍に伸びる。
+# (1) すべての artifacts を生成（本 config の推奨実行）
+#     bsdf simulate --config sample_inputs/config_all_artifacts.yaml \
+#                   -m both --log-to-mlflow
+#
+# (2) FFT だけでも多条件 + ml + 実測オーバーレイを記録
+#     bsdf simulate --config sample_inputs/config_all_artifacts.yaml \
+#                   -m fft --log-to-mlflow
+#
+# (3) 生成された run を MLflow UI で確認
+#     mlflow ui --backend-store-uri mlruns
+#     # → http://localhost:5000 で artifacts タブを開く
+#
+# (4) 最新 run のレポートを HTML で再生成
+#     bsdf visualize --run-id latest --output report.html
+#
+# (5) ダッシュボードで形状パラメータを変えながら対話確認（設計探索）
+#     bsdf dashboard --config sample_inputs/config_all_artifacts.yaml \
+#                    --port 5006
+#
+# ── 計算時間の目安 ─────────────────────────────────────────────────────────
+#   precision=fast, grid_size=1024: 数分〜10 分程度
+#   grid_size を 2048 以上 / precision=standard にすると
+#   多層合成が支配的で数倍に伸びる
 
 simulation:
   # 多条件（2 波長 × 2 入射角 × 2 モード = 8 条件）で bsdf_2d_<method>_wl..._aoi..._<mode>.png

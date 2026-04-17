@@ -4,12 +4,38 @@
 #   - SphericalArraySurface（球状凸アレイ）の sim 結果を
 #     LightTools 形式の実測 BSDF と並置比較する
 #
-# 実行例:
-#   bsdf simulate  --config sample_inputs/config_comp_meas_bsdf.yaml -m fft --log-to-mlflow
-#   bsdf dashboard --config sample_inputs/config_comp_meas_bsdf.yaml --port 5006
-#   bsdf runs list --sort-by log_rmse_mean
+# ── CLI 使用例 ──────────────────────────────────────────────────────────────
 #
-# 比較結果の出方:
+# (1) 多条件 simulate（24 条件）を MLflow に記録
+#     bsdf simulate --config sample_inputs/config_comp_meas_bsdf.yaml \
+#                   -m fft --log-to-mlflow
+#
+# (2) FFT + PSD を両方計算して比較
+#     bsdf simulate --config sample_inputs/config_comp_meas_bsdf.yaml \
+#                   -m both --log-to-mlflow
+#
+# (3) Optuna 最適化（実測との Log-RMSE を最小化）
+#     bsdf optimize --config sample_inputs/config_comp_meas_bsdf.yaml \
+#                   --trials 100
+#
+# (4) ダッシュボードを起動して球状凸アレイ形状を対話的に調整
+#     bsdf dashboard --config sample_inputs/config_comp_meas_bsdf.yaml \
+#                    --port 5006
+#     # → 他 PC からもアクセスしたい場合: --host 0.0.0.0
+#
+# (5) simulate 後に MLflow 記録された run を可視化
+#     bsdf runs list --sort-by log_rmse_mean --limit 10
+#     bsdf visualize --run-id latest --output report.html
+#     bsdf visualize --run-id best:log_rmse_mean --log-to-mlflow
+#
+# (6) 表面形状だけ PNG で確認
+#     bsdf surface --config sample_inputs/config_comp_meas_bsdf.yaml \
+#                  --format png -o spherical_array.png --unit um
+#
+# (7) 複数 run の比較レポート
+#     bsdf report --run-ids <id1>,<id2>,<id3> --output compare.html
+#
+# ── 比較結果の出方 ─────────────────────────────────────────────────────────
 #   - Parquet: sim 行 + measured 行が並び、条件ごとに log_rmse が付与される
 #   - plots/bsdf_report.html: 1D プロファイルに実測が黒点 Scatter でオーバーレイ
 #   - dashboard: スライダー操作中の 1D に条件一致の実測ブロックを自動オーバーレイ

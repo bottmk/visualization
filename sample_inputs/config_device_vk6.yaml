@@ -6,9 +6,32 @@
 #   - 多波長・多入射角・BRDF/BTDF の 1 run 実行
 #   - BSDF 実測ファイル（.bsdf）との自動比較
 #
-# 使用例:
-#   bsdf simulate --config sample_inputs/config_device_vk6.yaml -m fft
-#   bsdf simulate --config sample_inputs/config_device_vk6.yaml -m both --log-to-mlflow
+# ── CLI 使用例 ──────────────────────────────────────────────────────────────
+#
+# (1) FFT のみで simulate（Parquet 出力のみ、MLflow 記録なし）
+#     bsdf simulate --config sample_inputs/config_device_vk6.yaml -m fft
+#
+# (2) FFT + PSD 両方を計算して MLflow に記録
+#     bsdf simulate --config sample_inputs/config_device_vk6.yaml \
+#                   -m both --log-to-mlflow
+#
+# (3) 実測ファイルを CLI から上書き（config の measured_bsdf.path を無視）
+#     bsdf simulate --config sample_inputs/config_device_vk6.yaml \
+#                   -m fft --log-to-mlflow \
+#                   --measured-bsdf path/to/other.bsdf
+#
+# (4) 表面形状だけ PNG / HTML 出力
+#     bsdf surface --config sample_inputs/config_device_vk6.yaml \
+#                  --format png -o vk6_surface.png --unit nm
+#     bsdf surface --config sample_inputs/config_device_vk6.yaml \
+#                  --format html -o vk6_surface.html
+#
+# (5) 実測形状 + 実測 BSDF を dashboard で比較（形状はスライダー無し・固定表示）
+#     bsdf dashboard --config sample_inputs/config_device_vk6.yaml
+#
+# (6) simulate 後、条件ごとの Log-RMSE で run をソート
+#     bsdf runs list --sort-by log_rmse_mean --limit 10
+#     bsdf visualize --run-id best:log_rmse_mean --log-to-mlflow
 
 simulation:
   # スカラでも list でも指定可能（案 2-B）
