@@ -340,13 +340,14 @@ def save_heightmap_png(
     x_axis = np.linspace(0, phys, N)
     y_axis = np.linspace(0, phys, N)
 
-    fig = plt.figure(figsize=(12, 9))
+    # MLflow UI で縦スクロール不要になる縦サイズに抑える（元 12x9 → 6x4.5）
+    fig = plt.figure(figsize=(6, 4.5))
     rq_nm = float(np.sqrt(np.mean((hm.data - hm.data.mean()) ** 2))) * 1000
     fig.suptitle(
         f"{title}  (grid={N}x{N}, pixel={hm.pixel_size_um}um, Rq={rq_nm:.2f}nm)",
-        fontsize=12,
+        fontsize=9,
     )
-    gs = GridSpec(2, 3, figure=fig, hspace=0.38, wspace=0.38)
+    gs = GridSpec(2, 3, figure=fig, hspace=0.45, wspace=0.45)
 
     # 2D color map
     ax_map = fig.add_subplot(gs[:, :2])
@@ -357,27 +358,32 @@ def save_heightmap_png(
         cmap=colormap,
         aspect="equal",
     )
-    ax_map.set_xlabel("x [um]")
-    ax_map.set_ylabel("y [um]")
-    ax_map.set_title(f"Height map [{unit_label}]")
-    plt.colorbar(im, ax=ax_map, label=f"Height [{unit_label}]", fraction=0.046)
+    ax_map.set_xlabel("x [um]", fontsize=8)
+    ax_map.set_ylabel("y [um]", fontsize=8)
+    ax_map.set_title(f"Height map [{unit_label}]", fontsize=9)
+    ax_map.tick_params(labelsize=7)
+    cbar = plt.colorbar(im, ax=ax_map, label=f"Height [{unit_label}]", fraction=0.046)
+    cbar.ax.tick_params(labelsize=7)
+    cbar.set_label(f"Height [{unit_label}]", fontsize=8)
 
     # Height histogram
     ax_hist = fig.add_subplot(gs[0, 2])
     ax_hist.hist(data.ravel(), bins=80, color="steelblue", alpha=0.8, edgecolor="none")
-    ax_hist.set_xlabel(f"Height [{unit_label}]")
-    ax_hist.set_ylabel("Count")
-    ax_hist.set_title("Height distribution")
+    ax_hist.set_xlabel(f"Height [{unit_label}]", fontsize=8)
+    ax_hist.set_ylabel("Count", fontsize=8)
+    ax_hist.set_title("Height distribution", fontsize=9)
+    ax_hist.tick_params(labelsize=7)
 
     # X/Y cross-section profiles
     ax_px = fig.add_subplot(gs[1, 2])
     mid = N // 2
     ax_px.plot(x_axis, data[:, mid], color="royalblue", linewidth=0.8, label="X profile")
     ax_px.plot(y_axis, data[mid, :], color="tomato",    linewidth=0.8, label="Y profile")
-    ax_px.set_xlabel("[um]")
-    ax_px.set_ylabel(f"Height [{unit_label}]")
-    ax_px.set_title(f"Cross-section (center)")
-    ax_px.legend(fontsize=8)
+    ax_px.set_xlabel("[um]", fontsize=8)
+    ax_px.set_ylabel(f"Height [{unit_label}]", fontsize=8)
+    ax_px.set_title("Cross-section (center)", fontsize=9)
+    ax_px.tick_params(labelsize=7)
+    ax_px.legend(fontsize=7)
 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,79 @@
+# Claude Code が探索・読込対象から除外するファイル
+# .gitignore と同じ構文。コンテキスト節約と検索ノイズ削減が目的。
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# --- ビルド / パッケージング ---
+*.egg-info/
+*.egg
+dist/
+build/
+
+# --- 仮想環境 ---
+.venv/
+venv/
+env/
+
+# --- テスト・型・Lint キャッシュ ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# --- MLflow 実行結果（ローカル artifact は読む必要なし。
+#     MLflow の仕組みは spec_main.md / holoviews_plots.py 側を参照） ---
+mlruns/
+mlartifacts/
+
+# --- Optuna / 実験永続化 DB ---
+*.db
+*.sqlite
+*.sqlite3
+
+# --- 生成物（BSDF/表面の計算結果。元となる .py だけ読めば十分） ---
+*.parquet
+*.npy
+*.npz
+
+# --- 可視化の出力（holoviews_plots.py が吐くアーティファクト） ---
+# ソースは src/ 配下なのでそちらを読む。生成された HTML/PNG 自体は除外。
+outputs/
+artifacts/
+plots/
+*.html
+*.png
+*.jpg
+*.jpeg
+*.svg
+*.pdf
+
+# --- サンプル入力の巨大バイナリ（README.txt と config_*.yaml は残す） ---
+sample_inputs/*.bsdf
+sample_inputs/*.csv
+
+# --- Jupyter ---
+.ipynb_checkpoints/
+*.ipynb
+
+# --- ログ ---
+*.log
+logs/
+
+# --- OS / エディタ ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# --- その他 ---
+tmp/
+scratch/

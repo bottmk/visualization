@@ -96,10 +96,13 @@ def _make_1d_overlay(
     title: str,
     measured_profile: tuple[np.ndarray, np.ndarray] | None = None,
     ylim: tuple[float, float] | None = None,
+    xscale: str = "linear",
 ) -> Any:
     """UV グリッドから phi=0° プロファイルを抽出し、実測と重ね描きする。
 
     Args:
+        scale: Y軸スケール "linear" or "log"（BSDF）
+        xscale: X軸スケール "linear" or "log"（散乱角）
         ylim: Y軸範囲 (ymin, ymax)。None の場合は自動スケール。
     """
     # sim: phi≈0 スライス（u 軸方向）
@@ -111,6 +114,12 @@ def _make_1d_overlay(
     valid = np.abs(u_axis) <= 1.0
     y_sim = np.maximum(bsdf_slice[valid], 1e-10)
     x_sim = theta_s[valid]
+
+    # log X 軸では theta=0 を除外（log 0 未定義）
+    if xscale == "log":
+        mask_log = x_sim > 0.05
+        x_sim = x_sim[mask_log]
+        y_sim = y_sim[mask_log]
 
     sim_curve = hv.Curve(
         (x_sim, y_sim),
@@ -124,23 +133,33 @@ def _make_1d_overlay(
     if measured_profile is not None:
         x_meas, y_meas = measured_profile
         if len(x_meas) > 0:
-            meas_scatter = hv.Scatter(
-                (x_meas, y_meas),
-                kdims=["散乱角 θ_s [deg]"],
-                vdims=["BSDF [sr⁻¹]"],
-                label="実測データ",
-            ).opts(color="black", size=6, marker="circle")
-            elements.append(meas_scatter)
+            if xscale == "log":
+                mask_m = x_meas > 0.05
+                x_meas = x_meas[mask_m]
+                y_meas = y_meas[mask_m]
+            if len(x_meas) > 0:
+                meas_scatter = hv.Scatter(
+                    (x_meas, y_meas),
+                    kdims=["散乱角 θ_s [deg]"],
+                    vdims=["BSDF [sr⁻¹]"],
+                    label="実測データ",
+                ).opts(color="black", size=6, marker="circle")
+                elements.append(meas_scatter)
 
     overlay_opts: dict[str, Any] = dict(
         title=title,
         width=700,
         height=450,
         legend_position="top_right",
+        logx=(xscale == "log"),
         logy=(scale == "log"),
-        xlim=(0, 90),
-        hooks=[_xticks_hook],
     )
+    if xscale == "log":
+        # log スケールでは固定 ticker を使わず、bokeh の LogTicker に任せる
+        overlay_opts["xlim"] = (0.1, 90)
+    else:
+        overlay_opts["xlim"] = (0, 90)
+        overlay_opts["hooks"] = [_xticks_hook]
     if ylim is not None:
         overlay_opts["ylim"] = ylim
     overlay = hv.Overlay(elements).opts(**overlay_opts)
@@ -444,18 +463,23 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             value=2.5, step=0.05,
         )
         scale_selector = pn.widgets.RadioButtonGroup(
-            name="BSDF スケール", options=["linear", "log"], value="log",
+            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
+        )
+        xscale_selector = pn.widgets.RadioButtonGroup(
+            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
         )
         fix_ylim, ymin_input, ymax_input = self._make_ylim_controls()
 
         meas_profile = self._measured_profile()
 
         @pn.depends(
-            rq=rq_slider, lc=lc_slider, fractal=fractal_slider, scale=scale_selector,
+            rq=rq_slider, lc=lc_slider, fractal=fractal_slider,
+            scale=scale_selector, xscale=xscale_selector,
             fix=fix_ylim, ymin=ymin_input, ymax=ymax_input,
         )
         def update_plot(
-            rq: float, lc: float, fractal: float, scale: str,
+            rq: float, lc: float, fractal: float,
+            scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
         ) -> Any:
             try:
@@ -468,7 +492,7 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
                 ylim = (ymin, ymax) if fix else None
                 return _make_1d_overlay(
                     u, v, bsdf, scale, title,
-                    measured_profile=meas_profile, ylim=ylim,
+                    measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                 )
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
@@ -490,7 +514,8 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             pn.pane.Markdown("# BSDF ダッシュボード — RandomRoughSurface"),
             pn.Row(
                 pn.Column(
-                    rq_slider, lc_slider, fractal_slider, scale_selector,
+                    rq_slider, lc_slider, fractal_slider,
+                    scale_selector, xscale_selector,
                     fix_ylim, ymin_input, ymax_input,
                     pn.pane.Markdown(update_metrics),
                     width=300,
@@ -585,7 +610,10 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             name="重なり処理", options=["Maximum", "Additive"], value="Maximum",
         )
         scale_selector = pn.widgets.RadioButtonGroup(
-            name="BSDF スケール", options=["linear", "log"], value="log",
+            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
+        )
+        xscale_selector = pn.widgets.RadioButtonGroup(
+            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
         )
         fix_ylim, ymin_input, ymax_input = self._make_ylim_controls()
 
@@ -593,12 +621,14 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
 
         @pn.depends(
             radius=radius_slider, pitch=pitch_slider, base=base_slider,
-            placement=placement_select, overlap=overlap_select, scale=scale_selector,
+            placement=placement_select, overlap=overlap_select,
+            scale=scale_selector, xscale=xscale_selector,
             fix=fix_ylim, ymin=ymin_input, ymax=ymax_input,
         )
         def update_plot(
             radius: float, pitch: float, base: float,
-            placement: str, overlap: str, scale: str,
+            placement: str, overlap: str,
+            scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
         ) -> Any:
             try:
@@ -612,7 +642,7 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                 ylim = (ymin, ymax) if fix else None
                 return _make_1d_overlay(
                     u, v, bsdf, scale, title,
-                    measured_profile=meas_profile, ylim=ylim,
+                    measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                 )
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
@@ -641,7 +671,8 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             pn.Row(
                 pn.Column(
                     radius_slider, pitch_slider, base_slider,
-                    placement_select, overlap_select, scale_selector,
+                    placement_select, overlap_select,
+                    scale_selector, xscale_selector,
                     fix_ylim, ymin_input, ymax_input,
                     pn.pane.Markdown(update_metrics),
                     width=320,
@@ -672,18 +703,22 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
 
     def create_dashboard(self) -> Any:
         scale_selector = pn.widgets.RadioButtonGroup(
-            name="BSDF スケール", options=["linear", "log"], value="log",
+            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
+        )
+        xscale_selector = pn.widgets.RadioButtonGroup(
+            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
         )
         fix_ylim, ymin_input, ymax_input = self._make_ylim_controls()
 
         meas_profile = self._measured_profile()
 
         @pn.depends(
-            scale=scale_selector,
+            scale=scale_selector, xscale=xscale_selector,
             fix=fix_ylim, ymin=ymin_input, ymax=ymax_input,
         )
         def update_plot(
-            scale: str, fix: bool, ymin: float, ymax: float,
+            scale: str, xscale: str,
+            fix: bool, ymin: float, ymax: float,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_bsdf_for_model(
@@ -695,7 +730,7 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
                 ylim = (ymin, ymax) if fix else None
                 return _make_1d_overlay(
                     u, v, bsdf, scale, title,
-                    measured_profile=meas_profile, ylim=ylim,
+                    measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                 )
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
@@ -720,7 +755,7 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
             ),
             pn.Row(
                 pn.Column(
-                    scale_selector,
+                    scale_selector, xscale_selector,
                     fix_ylim, ymin_input, ymax_input,
                     pn.pane.Markdown(metrics_md),
                     width=320,
