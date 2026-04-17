@@ -1,0 +1,65 @@
+# SphericalArraySurface × BSDF 実測ファイル 比較サンプル config
+#
+# 目的:
+#   - SphericalArraySurface（球状凸アレイ）の sim 結果を
+#     LightTools 形式の実測 BSDF と並置比較する
+#
+# 実行例:
+#   bsdf simulate  --config sample_inputs/config_comp_meas_bsdf.yaml -m fft --log-to-mlflow
+#   bsdf dashboard --config sample_inputs/config_comp_meas_bsdf.yaml --port 5006
+#   bsdf runs list --sort-by log_rmse_mean
+#
+# 比較結果の出方:
+#   - Parquet: sim 行 + measured 行が並び、条件ごとに log_rmse が付与される
+#   - plots/bsdf_report.html: 1D プロファイルに実測が黒点 Scatter でオーバーレイ
+#   - dashboard: スライダー操作中の 1D に条件一致の実測ブロックを自動オーバーレイ
+
+simulation:
+  # LightTools 実測ファイルに合わせた 24 条件グリッド（3 波長 × 4 入射角 × 2 モード）
+  wavelength_um: [0.465, 0.525, 0.630]
+  theta_i_deg:   [0.0, 20.0, 40.0, 60.0]
+  mode:          ['BRDF', 'BTDF']
+  phi_i_deg: 0.0
+  n1: 1.0
+  n2: 1.5
+  polarization: 'Unpolarized'
+
+surface:
+  model: 'SphericalArraySurface'
+  grid_size: 1024                 # 本計算用グリッド
+  pixel_size_um: 0.25             # 物理サイズ = 1024 × 0.25 = 256 μm 角
+
+  spherical_array:
+    radius_um: 5.0                # 曲率半径 [μm]
+    base_height_um: 0.0           # ベース高さ [μm]
+    placement: 'Hexagonal'        # 'Grid' / 'Hexagonal' / 'Random' / 'PoissonDisk'
+    pitch_um: 10.0                # 配置ピッチ [μm]
+    overlap_mode: 'Maximum'       # 'Maximum' / 'Additive'
+
+# ── BSDF 実測ファイルとの比較 ─────────────────────────────────────────
+# 省略可。指定時は sim 結果と合わせて Parquet に保存され、
+# 条件ごとに Log-RMSE が自動計算される。
+measured_bsdf:
+  path: 'sample_inputs/BRDF_BTDF_LightTools.bsdf'
+  match_measured: true            # true: 実測ファイル内の条件を sim に自動採用
+                                  # false: simulation: セクションの条件で実行
+  tolerance_deg: 1.0              # sim⇔実測マッチングの入射角許容 [deg]
+  tolerance_nm: 5.0               # 波長許容 [nm]
+
+error_metrics:
+  bsdf_floor: 1.0e-6
+
+metrics:
+  # Haze/Gloss/DOI は規格準拠のため代表波長 1 つでのみ計算される
+  representative_wavelength_um: 0.555   # V(λ) ピーク付近
+
+  haze:
+    enabled: true
+    cone_half_angle_deg: 2.5
+  gloss:
+    enabled: true
+    specular_half_angle_deg: 2.5
+  doi:
+    enabled: false
+  sparkle:
+    enabled: false
