@@ -117,6 +117,9 @@ MLflow の当該 run に以下が自動保存される。
 - `data/bsdf_data.parquet`
 - `plots/surface.png` / `plots/surface.html`
 - `plots/bsdf_2d_<method>[条件サフィックス].png`
+  - `<method>` は小文字で `fft` / `psd` / `ml`（`ml` は `adding_doubling.enabled: true` 時の多層合成結果）
+  - 条件サフィックスは多条件時のみ付与: `_wl<nm>nm_aoi<deg>_<brdf|btdf>`
+    （例: `bsdf_2d_fft_wl525nm_aoi20_brdf.png`）
 - `plots/bsdf_report.html`（多条件時は Panel Tabs で条件別、実測データは黒点 Scatter オーバーレイ）
 
 ---

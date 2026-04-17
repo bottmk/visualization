@@ -435,7 +435,7 @@ optuna:
 
 ### 6.2. MLflowによる一元管理ルール
 プロジェクトの肥大化を防ぐため、Experiment（実験）を以下の順序で階層管理する。
-1. **01_BSDF_Raw_Data（データ貯蔵庫）** ✅ 実装済み: 1 Run = 1 形状。Optunaの各Trialのパラメータ、メトリクス（各種評価指標）、および生データ（Parquet、2Dヒートマップ、インタラクティブ HTML）をArtifactとして保存する。`RawDataLogger` クラスで実装。`simulate --log-to-mlflow` 時に surface.png/html、bsdf_2d_*.png、bsdf_report.html を自動生成して記録。
+1. **01_BSDF_Raw_Data（データ貯蔵庫）** ✅ 実装済み: 1 Run = 1 形状。Optunaの各Trialのパラメータ、メトリクス（各種評価指標）、および生データ（Parquet、2Dヒートマップ、インタラクティブ HTML）をArtifactとして保存する。`RawDataLogger` クラスで実装。`simulate --log-to-mlflow` 時に surface.png/html、bsdf_2d_*.png、bsdf_report.html を自動生成して記録。`bsdf_2d_<method>[条件サフィックス].png` の `<method>` は小文字で `fft` / `psd` / `ml`（`ml` は `adding_doubling.enabled: true` 時の多層合成結果）、条件サフィックスは多条件時のみ `_wl<nm>nm_aoi<deg>_<brdf|btdf>` が付与される。
 2. **02_Analysis_Reports（比較レポート）** ✅ 実装済み: 1 Run = 1 解析タスク。複数の形状データを引き出して重ね合わせたインタラクティブなBSDF比較グラフ（HTML）を保存する。`AnalysisLogger` クラスで実装。`bsdf report --log-to-mlflow` 時に source_run_ids と comparison_report.html を記録。
 3. **03_GenAI_Insights（AI考察）** ⚠️ **未実装・構想段階**: LLMを用いて、測定値やメトリクスに基づく設計改善の考察レポートを自動生成・記録する。現状は `EXPERIMENT_GENAI = "03_GenAI_Insights"` の定数のみ `optimization/mlflow_logger.py` に定義されており、`GenAILogger` クラスおよびロジックは未実装。Section 11 の TODO 参照。
 
