@@ -149,7 +149,10 @@ def _make_1d_overlay(
                     kdims=["散乱角 θ_s [deg]"],
                     vdims=["BSDF [sr⁻¹]"],
                     label="実測データ",
-                ).opts(color="black", size=6, marker="circle")
+                ).opts(
+                    color="black", size=8, marker="circle",
+                    line_color="white", line_width=1, alpha=1.0,
+                )
                 elements.append(meas_scatter)
 
     overlay_opts: dict[str, Any] = dict(
