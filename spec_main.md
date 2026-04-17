@@ -1054,7 +1054,8 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 
 | 日付 | 変更内容 | 対応コミット |
 |---|---|---|
-| 2026-04-17 | dashboard X 軸リニア／対数切替 + surface.png 表示サイズ縮小: `_make_1d_overlay()` に `xscale` 引数を追加し 3 ダッシュボード全てに `xscale_selector`（RadioButtonGroup）を配置（log 時は `theta>0.05` のみ表示）。`save_heightmap_png()` の figsize を (12,9) → (6,4.5) に半減、フォントサイズも調整して MLflow UI でスクロール不要に | 本コミット |
+| 2026-04-17 | `compute_bsdf_fft` に `fft_mode` 引数追加（`tilt`/`output_shift`/`zero`）: `tilt`（既定、現行挙動） / `output_shift`（位相傾き項を入力に入れず出力 u_grid をシフト、スペクトル漏れなしだが θ_i 大で後方散乱欠損） / `zero`（垂直入射近似、θ_i 非依存で 1 回計算）。詳細は `docs/fft_bsdf_math.md` 参照。テスト 311→319 件 | 本コミット |
+| 2026-04-17 | dashboard X 軸リニア／対数切替 + surface.png 表示サイズ縮小: `_make_1d_overlay()` に `xscale` 引数を追加し 3 ダッシュボード全てに `xscale_selector`（RadioButtonGroup）を配置（log 時は `theta>0.05` のみ表示）。`save_heightmap_png()` の figsize を (12,9) → (6,4.5) に半減、フォントサイズも調整して MLflow UI でスクロール不要に | `c699d27` |
 | 2026-04-17 | dashboard UI 改善: Y 軸範囲固定機能（Checkbox + Y最小/Y最大 FloatInput）、X 軸目盛を 10° major / 5° minor に固定、X 軸範囲を 0-90° に固定。3 ダッシュボード（RandomRough/Spherical/Measured）すべてに適用 | `8a32951` |
 | 2026-04-16 | `bsdf dashboard` に `--host` オプション追加。`0.0.0.0` 指定で他 PC からアクセス可能に | `ce8d6f9` |
 | 初期実装 | Python パッケージ全体・テスト 53件 | `8d422d1` |

@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 _WIDE_ANGLE_WARNING_DEG = 30.0
 
 
+_VALID_FFT_MODES = ("tilt", "output_shift", "zero")
+
+
 def compute_bsdf_fft(
     height_map: HeightMap,
     wavelength_um: float,
@@ -30,6 +33,7 @@ def compute_bsdf_fft(
     n2: float = 1.5,
     polarization: str = "Unpolarized",
     is_btdf: bool = False,
+    fft_mode: str = "tilt",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """FFT法（スカラー回折理論）でBSDFを計算する。
 
@@ -42,6 +46,17 @@ def compute_bsdf_fft(
         n2: 透過側媒質の屈折率（BRDFモードでは使用しない）
         polarization: 'S' / 'P' / 'Unpolarized'（FFT法では偏光依存性なし）
         is_btdf: True の場合 BTDF として位相変換を行う
+        fft_mode: 'tilt' / 'output_shift' / 'zero' から選択
+            - 'tilt'（既定）: `phi_tilt` を入力に加え specular を正しい (u,v) に配置。
+              全半球をカバーするが、sin(θ_i)·N·dx/λ が非整数だと DFT のスペクトル
+              漏れが発生する。
+            - 'output_shift': `phi_tilt` を使わず、出力 u_grid/v_grid のラベルを
+              u_spec だけシフトする。漏れは発生しないが、θ_i が大きいと半球の
+              後方散乱側が FFT 格子に収まらず欠損する。
+              dx <= λ/(2·(1+|sin θ_i|)) が条件。
+            - 'zero'（垂直入射近似）: cos θ_i を 1、sin θ_i を 0 とみなし、入射
+              方向依存を無視して 1 回だけ FFT する。θ_i に関わらず specular は
+              (u,v)=(0,0) のまま。パターン形状の参考用途や小角度の近似計算に。
 
     Returns:
         u_grid: 方向余弦 u = sin(theta_s)*cos(phi_s) の2次元グリッド
@@ -49,8 +64,14 @@ def compute_bsdf_fft(
         bsdf: BSDF値 [sr⁻¹] の2次元グリッド（u_grid, v_grid と同形状）
 
     Raises:
-        ValueError: theta_i_deg が無効な範囲の場合
+        ValueError: theta_i_deg が無効な範囲、または fft_mode が未知の値の場合
     """
+    if fft_mode not in _VALID_FFT_MODES:
+        raise ValueError(
+            f"fft_mode は {_VALID_FFT_MODES} のいずれかでなければならない。"
+            f"値={fft_mode!r}"
+        )
+
     # 広角 × 偏光の警告
     if polarization in ("S", "P"):
         logger.warning(
@@ -69,28 +90,37 @@ def compute_bsdf_fft(
     cos_i = np.cos(theta_i_rad)
     sin_i = np.sin(theta_i_rad)
 
+    # 'zero' モードでは垂直入射 (θ_i=0) と同値扱いにする
+    effective_cos_i = 1.0 if fft_mode == "zero" else cos_i
+    effective_sin_i = 0.0 if fft_mode == "zero" else sin_i
+
     # ── 位相変換 ─────────────────────────────────────────────────────────────
     if is_btdf:
         # BTDFモード: φ(x,y) = (2π/λ)*(n2*cos(θ_t) - n1*cos(θ_i))*h
         from .fresnel import snell_angle
-        theta_t_deg = snell_angle(theta_i_deg, n1, n2)
-        theta_t_rad = np.deg2rad(theta_t_deg)
-        cos_t = np.cos(theta_t_rad)
-        phi_surface = k * (n2 * cos_t - n1 * cos_i) * h
+        if fft_mode == "zero":
+            # 垂直入射近似: θ_t=0, cos θ_t = 1
+            phi_surface = k * (n2 - n1) * h
+        else:
+            theta_t_deg = snell_angle(theta_i_deg, n1, n2)
+            theta_t_rad = np.deg2rad(theta_t_deg)
+            cos_t = np.cos(theta_t_rad)
+            phi_surface = k * (n2 * cos_t - n1 * effective_cos_i) * h
     else:
         # BRDFモード: φ(x,y) = (4π/λ)*n1*h*cos(θ_i)
-        phi_surface = (4 * np.pi / wavelength_um) * n1 * h * cos_i
+        phi_surface = (4 * np.pi / wavelength_um) * n1 * h * effective_cos_i
 
-    # 斜入射時の x 方向傾き項（シフト不変性の活用）
-    # φ_tilt(x) = (2π/λ)*n1*sin(θ_i)*cos(φ_i)*x
-    #             + (2π/λ)*n1*sin(θ_i)*sin(φ_i)*y
-    x_coords = np.arange(N) * dx
-    y_coords = np.arange(N) * dx
-    xx, yy = np.meshgrid(x_coords, y_coords, indexing="ij")
-    phi_tilt = k * n1 * sin_i * (np.cos(phi_i_rad) * xx + np.sin(phi_i_rad) * yy)
-
-    # 複素振幅
-    U = np.exp(1j * (phi_surface + phi_tilt))
+    # 斜入射時の x 方向傾き項（tilt モードのみ）
+    # φ_tilt(x,y) = k*n1*sin(θ_i)*(cos(φ_i)*x + sin(φ_i)*y)
+    if fft_mode == "tilt":
+        x_coords = np.arange(N) * dx
+        y_coords = np.arange(N) * dx
+        xx, yy = np.meshgrid(x_coords, y_coords, indexing="ij")
+        phi_tilt = k * n1 * sin_i * (np.cos(phi_i_rad) * xx + np.sin(phi_i_rad) * yy)
+        U = np.exp(1j * (phi_surface + phi_tilt))
+    else:
+        # output_shift / zero: 入力側に tilt を入れない
+        U = np.exp(1j * phi_surface)
 
     # ── 2次元 FFT ─────────────────────────────────────────────────────────────
     U_fft = np.fft.fft2(U)
@@ -102,9 +132,17 @@ def compute_bsdf_fft(
     freq_y = np.fft.fftfreq(N, d=dx)
     fx, fy = np.meshgrid(freq_x, freq_y, indexing="ij")
 
-    # 方向余弦: u = f_x * λ, v = f_y * λ（スネルの法則より sin(θ_s) = f * λ）
-    u_grid = fx * wavelength_um
-    v_grid = fy * wavelength_um
+    # 方向余弦: u = f_x * λ + u_spec_offset
+    # output_shift のみラベルを u_spec 分シフトする（tilt/zero はオフセット 0）
+    if fft_mode == "output_shift":
+        u_offset = n1 * sin_i * np.cos(phi_i_rad)
+        v_offset = n1 * sin_i * np.sin(phi_i_rad)
+    else:
+        u_offset = 0.0
+        v_offset = 0.0
+
+    u_grid = fx * wavelength_um + u_offset
+    v_grid = fy * wavelength_um + v_offset
 
     # 物理的に有効な範囲（u² + v² ≤ 1：半球内）
     uv_r2 = u_grid**2 + v_grid**2

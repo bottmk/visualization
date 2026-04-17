@@ -134,6 +134,57 @@ $$\boxed{\;\mathrm{BSDF}(u, v) \;=\; \frac{I(f_x, f_y)}{A \cdot \cos\theta_s \cd
 
 ---
 
+## 3 つの `fft_mode` オプション
+
+`compute_bsdf_fft(..., fft_mode=...)` で挙動を切替可能。既定値は `'tilt'`（後方互換）。
+
+### mode = 'tilt'（既定・現行方式）
+入力に $\varphi_\text{tilt}$ を加えて specular を (sin θ_i cos φ_i, sin θ_i sin φ_i) に配置。
+
+- ✅ 全半球カバー（θ_i に依らず $u \in [-\lambda/2dx, +\lambda/2dx)$）
+- ❌ $\sin\theta_i \cdot N \cdot dx / \lambda$ が非整数で **DFT スペクトル漏れ** が発生
+
+### mode = 'output_shift'（漏れなし）
+tilt を使わず、出力 `u_grid` ラベルを $u_\text{spec}$ だけシフト。
+
+- ✅ tilt 漏れが構造的に発生しない（前方散乱側で精度高）
+- ❌ $u$ の格子範囲が $[-\lambda/2dx + u_\text{spec},\ +\lambda/2dx + u_\text{spec})$ にシフトし、**θ_i が大きいと後方散乱側が欠落**
+- 条件: $dx \leq \lambda / \bigl(2(1 + |\sin\theta_i|)\bigr)$
+
+### mode = 'zero'（垂直入射近似・θ_i 非依存）
+$\cos\theta_i \to 1$, $\sin\theta_i \to 0$ を代入。θ_i によらず 1 回の FFT で計算。
+
+- ✅ 1 回計算で θ_i 無限通り使える（最速）、漏れなし、全半球カバー
+- ❌ specular は常に (0, 0)。θ_i 依存は物理的に失われる
+- 用途: パターン形状の参考表示、小角度（< 10°）の近似、教育目的
+
+### 比較サマリ
+
+| 観点 | tilt | output_shift | zero |
+|---|---|---|---|
+| specular 位置 | 物理的に正しい | 物理的に正しい | 常に (0, 0) |
+| 漏れ | あり | なし | なし |
+| 半球カバー | 常に完全 | θ_i 大で片側欠損 | 常に完全 |
+| θ_i 依存性 | 厳密 | 厳密 | なし（近似） |
+| 必要 $dx$ | $\leq \lambda/2$ | $\leq \lambda/\bigl(2(1+\|\sin\theta_i\|)\bigr)$ | $\leq \lambda/2$ |
+| 再利用 | 条件ごと計算 | 条件ごと計算 | 1 回で全 θ_i |
+
+### 使い分けガイド
+
+| 用途 | 推奨 mode |
+|---|---|
+| 後方互換（既存コード） | `tilt`（省略可） |
+| 前方散乱・specular 近傍の精密比較 | `output_shift` |
+| パターン形状のみ必要・最速計算 | `zero` |
+| 実測との定量一致（小粗さ） | PSD 法と併用 |
+
+### 実装参照
+- 実装: `src/bsdf_sim/optics/fft_bsdf.py`
+- デモ: `outputs/_demo_fft_modes.py` → `outputs/fft_modes_comparison.png`
+- テスト: `tests/test_fft_bsdf.py::TestFFTModes`
+
+---
+
 ## 関連ファイル
 
 - 実装: `src/bsdf_sim/optics/fft_bsdf.py`

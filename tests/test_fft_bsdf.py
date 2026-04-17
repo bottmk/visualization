@@ -130,3 +130,115 @@ class TestFFTBSDF:
         valid = bsdf > 0
         uv_r = np.sqrt(u[valid]**2 + v[valid]**2)
         assert np.all(uv_r <= 1.0 + 1e-5)
+
+
+class TestFFTModes:
+    """fft_mode = 'tilt' / 'output_shift' / 'zero' の 3 モードのテスト。"""
+
+    @pytest.fixture
+    def rough_surface(self):
+        """中粗さのランダムラフ表面（漏れの効果が可視化できる）。"""
+        surface = RandomRoughSurface(
+            grid_size=256, pixel_size_um=0.2,  # λ/(2dx)=1.375 で output_shift も OK
+            rq_um=0.02, lc_um=2.0, fractal_dim=2.5, seed=42,
+        )
+        return surface.get_height_map()
+
+    def test_invalid_mode_raises(self, rough_surface):
+        with pytest.raises(ValueError, match="fft_mode"):
+            compute_bsdf_fft(
+                height_map=rough_surface, wavelength_um=0.55,
+                theta_i_deg=0.0, phi_i_deg=0.0, fft_mode="unknown",
+            )
+
+    def test_tilt_default_backward_compat(self, rough_surface):
+        """fft_mode 省略時は 'tilt' と同じ挙動（既存 API 互換）。"""
+        u1, v1, b1 = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=20.0, phi_i_deg=0.0,
+        )
+        u2, v2, b2 = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=20.0, phi_i_deg=0.0, fft_mode="tilt",
+        )
+        np.testing.assert_array_equal(u1, u2)
+        np.testing.assert_array_equal(v1, v2)
+        np.testing.assert_array_equal(b1, b2)
+
+    def test_tilt_vs_output_shift_peak_location(self, rough_surface):
+        """tilt / output_shift どちらも specular が (sin θ_i, 0) に出る。"""
+        ti = 20.0
+        u_spec = np.sin(np.deg2rad(ti))
+        for mode in ("tilt", "output_shift"):
+            u, v, b = compute_bsdf_fft(
+                height_map=rough_surface, wavelength_um=0.55,
+                theta_i_deg=ti, phi_i_deg=0.0, fft_mode=mode,
+            )
+            idx = np.unravel_index(np.argmax(b), b.shape)
+            assert abs(u[idx] - u_spec) < 0.05, f"{mode}: u_peak={u[idx]} vs {u_spec}"
+            assert abs(v[idx]) < 0.05, f"{mode}: v_peak={v[idx]}"
+
+    def test_zero_mode_peak_at_origin(self, rough_surface):
+        """zero モード: θ_i によらず specular は (0, 0) にとどまる。"""
+        for ti in (0.0, 20.0, 45.0):
+            u, v, b = compute_bsdf_fft(
+                height_map=rough_surface, wavelength_um=0.55,
+                theta_i_deg=ti, phi_i_deg=0.0, fft_mode="zero",
+            )
+            idx = np.unravel_index(np.argmax(b), b.shape)
+            assert abs(u[idx]) < 0.01, f"ti={ti}: u_peak={u[idx]}"
+            assert abs(v[idx]) < 0.01, f"ti={ti}: v_peak={v[idx]}"
+
+    def test_zero_mode_theta_i_independent(self, rough_surface):
+        """zero モード: 結果が θ_i に依存しない（BSDF グリッドが一致）。"""
+        _, _, b0 = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=0.0, phi_i_deg=0.0, fft_mode="zero",
+        )
+        _, _, b30 = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=30.0, phi_i_deg=0.0, fft_mode="zero",
+        )
+        _, _, b60 = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=60.0, phi_i_deg=0.0, fft_mode="zero",
+        )
+        np.testing.assert_allclose(b0, b30, rtol=1e-5)
+        np.testing.assert_allclose(b0, b60, rtol=1e-5)
+
+    def test_output_shift_no_leakage_at_flat_surface(self):
+        """h=0 の平面で output_shift モードは clean delta（漏れなし）。"""
+        flat_hm = HeightMap(data=np.zeros((256, 256), dtype=np.float32), pixel_size_um=0.2)
+        u, v, b = compute_bsdf_fft(
+            height_map=flat_hm, wavelength_um=0.55,
+            theta_i_deg=20.0, phi_i_deg=0.0, fft_mode="output_shift",
+        )
+        b_sorted = np.sort(b.ravel())[::-1]
+        assert b_sorted[0] / max(b_sorted[1], 1e-30) > 1e5
+
+    def test_tilt_has_leakage_at_flat_surface(self):
+        """h=0 でも tilt モードは非整数 θ_i でスペクトル漏れを生じる（記録用）。"""
+        flat_hm = HeightMap(data=np.zeros((256, 256), dtype=np.float32), pixel_size_um=0.2)
+        # θ_i=20°: sin(20°)·N·dx/λ = 0.342·256·0.2/0.55 ≒ 31.83（非整数）→ 漏れる
+        u, v, b = compute_bsdf_fft(
+            height_map=flat_hm, wavelength_um=0.55,
+            theta_i_deg=20.0, phi_i_deg=0.0, fft_mode="tilt",
+        )
+        b_sorted = np.sort(b.ravel())[::-1]
+        # tilt では 2 番目以降にもエネルギーが残る（output_shift より悪い）
+        assert b_sorted[0] / max(b_sorted[1], 1e-30) < 1e4
+
+    def test_output_shift_grid_shifted(self, rough_surface):
+        """output_shift の u_grid は u_spec だけ正方向にオフセット。"""
+        ti = 30.0
+        u_spec = np.sin(np.deg2rad(ti))
+        u_t, _, _ = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=ti, phi_i_deg=0.0, fft_mode="tilt",
+        )
+        u_s, _, _ = compute_bsdf_fft(
+            height_map=rough_surface, wavelength_um=0.55,
+            theta_i_deg=ti, phi_i_deg=0.0, fft_mode="output_shift",
+        )
+        # tilt は中心 0 の格子、output_shift は中心 u_spec にシフト
+        np.testing.assert_allclose(u_s - u_t, u_spec, rtol=1e-5)
