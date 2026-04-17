@@ -311,17 +311,22 @@ def plot_heightmap(
 def save_heightmap_png(
     hm: "HeightMap",
     path: str | Path,
-    title: str = "表面形状",
+    title: str = "Surface height",
     colormap: str = "RdYlBu_r",
     unit: str = "nm",
     dpi: int = 150,
 ) -> None:
     """高さマップを PNG ファイルとして保存する（matplotlib 使用）。
 
+    Note:
+        matplotlib に日本語フォントが無い環境（CI/Codespace 等）では
+        日本語タイトルが豆腐（□）化するため、title は ASCII のみ推奨。
+        日本語 UI は HoloViews/Panel 側（HTML）で提供する。
+
     Args:
         hm: HeightMap オブジェクト
         path: 保存先パス
-        title: タイトル
+        title: タイトル（ASCII 推奨）
         colormap: matplotlib カラーマップ名
         unit: 表示単位 'nm' または 'um'
         dpi: 解像度
