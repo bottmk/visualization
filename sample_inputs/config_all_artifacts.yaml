@@ -1,0 +1,80 @@
+# MLflow artifacts を全種類生成するデモ用 config
+#
+# このファイルは `bsdf simulate --log-to-mlflow` で生成される
+# artifact 種類を全て網羅するためのサンプル。
+#
+#   data/bsdf_data.parquet
+#   plots/surface.png
+#   plots/surface.html
+#   plots/bsdf_2d_fft_wl<nm>nm_aoi<deg>_<mode>.png  ← 条件 × FFT 法（多条件）
+#   plots/bsdf_2d_psd_wl<nm>nm_aoi<deg>_<mode>.png  ← 条件 × PSD 法（-m both）
+#   plots/bsdf_2d_ml_wl<nm>nm_aoi<deg>_<mode>.png   ← 多層合成（adding_doubling）
+#   plots/bsdf_report.html                          ← 実測オーバーレイ込み
+#
+# 実行例:
+#   bsdf simulate --config sample_inputs/config_all_artifacts.yaml -m both --log-to-mlflow
+#
+# 計算時間の目安（precision=fast、grid_size=1024）: 数分〜10 分程度。
+# grid_size を 2048 以上 / precision=standard にすると多層合成が支配的で数倍に伸びる。
+
+simulation:
+  # 多条件（2 波長 × 2 入射角 × 2 モード = 8 条件）で bsdf_2d_<method>_wl..._aoi..._<mode>.png
+  # のサフィックスパターンを確認できる
+  wavelength_um: [0.525, 0.630]
+  theta_i_deg:   [0.0, 20.0]
+  mode:          ['BRDF', 'BTDF']
+  phi_i_deg: 0.0
+  n1: 1.0
+  n2: 1.5
+  polarization: 'Unpolarized'
+
+surface:
+  model: 'RandomRoughSurface'
+  grid_size: 1024
+  pixel_size_um: 0.25
+
+  random_rough:
+    rq_um: 0.005
+    lc_um: 2.0
+    fractal_dim: 2.5
+    seed: 42
+
+# ── 多層合成を有効化 ─ bsdf_2d_ml_*.png を生成するため ────────────────────
+adding_doubling:
+  enabled: true
+  precision: 'fast'           # 'fast' / 'standard' / 'high'（fast が高速）
+  layers:
+    - type: 'surface'         # 表面 AG 凹凸層
+    - type: 'bulk'            # 内部ヘイズ層
+      hg_g: 0.8
+      scattering_coeff: 0.1
+      thickness_um: 100.0
+    - type: 'surface'         # 裏面平滑層
+
+psd:
+  approx_mode: false
+
+# ── 実測 BSDF との比較 ─ bsdf_report.html に黒点オーバーレイ ──────────────
+measured_bsdf:
+  path: 'sample_inputs/BRDF_BTDF_LightTools.bsdf'
+  match_measured: false       # この config 側の 8 条件で sim を回し、
+                              # 各条件に最も近い実測ブロックを自動マッチング
+  tolerance_deg: 1.0
+  tolerance_nm: 5.0
+
+error_metrics:
+  bsdf_floor: 1.0e-6
+
+metrics:
+  representative_wavelength_um: 0.555
+
+  haze:
+    enabled: true
+    half_angle_deg: 2.5
+  gloss:
+    enabled: true
+    angle_deg: 60.0
+  doi:
+    enabled: true
+  sparkle:
+    enabled: false            # Sparkle は計算時間がかかるためデモではオフ
