@@ -890,12 +890,14 @@ def runs_list(
 @cli.command()
 @click.option("--config", "-c", required=True, type=click.Path(exists=True), help="設定ファイルパス（YAML）")
 @click.option("--port", "-p", default=5006, show_default=True, type=int, help="Panel サーバーポート")
+@click.option("--host", default="localhost", show_default=True,
+              help="バインドアドレス。'0.0.0.0' で全インターフェース公開（他PCからアクセス可）")
 @click.option("--preview-grid", default=512, show_default=True, type=int,
               help="プレビュー計算のグリッドサイズ（大きいほど精細・遅い）")
 @click.option("--no-browser", is_flag=True, default=False,
               help="起動時にブラウザを自動で開かない")
-def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> None:
-    """リアルタイム BSDF ダッシュボードをローカルサーバーで起動する。
+def dashboard(config: str, port: int, host: str, preview_grid: int, no_browser: bool) -> None:
+    """リアルタイム BSDF ダッシュボードをサーバーで起動する。
 
     config.yaml の `surface.model` に応じて以下のダッシュボードが起動する：
     - RandomRoughSurface: rq_um / lc_um / fractal_dim スライダー
@@ -904,6 +906,9 @@ def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> No
 
     `measured_bsdf.path` が config に指定されていれば、条件一致する
     実測ブロックを 1D プロファイルに黒点 Scatter で自動オーバーレイする。
+
+    他 PC からアクセスさせるには --host 0.0.0.0 を指定し、
+    ファイアウォールでポート（デフォルト 5006）を開放すること。
     """
     from ..visualization.dynamicmap import create_dashboard_from_config
 
@@ -911,11 +916,12 @@ def dashboard(config: str, port: int, preview_grid: int, no_browser: bool) -> No
     dash = create_dashboard_from_config(
         config_path=config, preview_grid_size_idle=preview_grid,
     )
+    display_host = host if host != "0.0.0.0" else "<このPCのIPアドレス>"
     logger.info(
-        f"ダッシュボード起動: http://localhost:{port}  "
+        f"ダッシュボード起動: http://{display_host}:{port}  "
         f"(Ctrl+C で停止)"
     )
-    dash.serve(port=port, show=(not no_browser))
+    dash.serve(port=port, show=(not no_browser), address=host)
 
 
 # ── visualize ─────────────────────────────────────────────────────────────────

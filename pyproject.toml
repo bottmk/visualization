@@ -6,6 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "bsdf-sim"
 version = "0.1.0"
 description = "AGフィルム光学散乱（BSDF）統合シミュレーション・最適化プログラム"
+license = {text = "MIT"}
+authors = [{name = "bottmk"}]
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.24,<3.0",

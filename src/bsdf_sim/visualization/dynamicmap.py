@@ -86,9 +86,10 @@ def _make_1d_overlay(
 ) -> Any:
     """UV グリッドから phi=0° プロファイルを抽出し、実測と重ね描きする。"""
     # sim: phi≈0 スライス（u 軸方向）
+    # fftfreq では index=0 が v=0（phi=0 方向）。
+    # N//2 は Nyquist 周波数で |v|>1（半球外）になり BSDF=0 になるため 0 を使う。
     u_axis = u[:, 0]
-    v_mid = u.shape[1] // 2
-    bsdf_slice = bsdf[:, v_mid]
+    bsdf_slice = bsdf[:, 0]
     theta_s = np.rad2deg(np.arcsin(np.clip(np.abs(u_axis), 0, 1)))
     valid = np.abs(u_axis) <= 1.0
     y_sim = np.maximum(bsdf_slice[valid], 1e-10)
@@ -233,10 +234,31 @@ class _BaseBSDFDashboard(ABC):
     def create_dashboard(self) -> Any:
         """サブクラスが UI を組み立てて Panel Layout を返す。"""
 
-    def serve(self, port: int = 5006, show: bool = True, **kwargs: Any) -> None:
-        """ダッシュボードをローカルサーバーで起動する。"""
+    def serve(
+        self,
+        port: int = 5006,
+        show: bool = True,
+        address: str = "localhost",
+        **kwargs: Any,
+    ) -> None:
+        """ダッシュボードをサーバーで起動する。
+
+        Args:
+            address: バインドするアドレス（"0.0.0.0" で全インターフェース公開）
+        """
         dashboard = self.create_dashboard(**kwargs)
-        pn.serve(dashboard, port=port, show=show)
+        websocket_origin: str | list[str]
+        if address in ("0.0.0.0", ""):
+            websocket_origin = "*"
+        else:
+            websocket_origin = f"{address}:{port}"
+        pn.serve(
+            dashboard,
+            port=port,
+            show=show,
+            address=address,
+            websocket_origin=websocket_origin,
+        )
 
 
 # ── キャッシュ付き計算（RandomRough 用 / Spherical 用）──────────────────────

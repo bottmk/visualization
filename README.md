@@ -88,13 +88,35 @@ bsdf simulate [オプション]
   -m, --method [fft|psd|both] 計算手法                       [デフォルト: both]
   --save-parquet / --no-save-parquet  Parquet 保存の有無     [デフォルト: 保存する]
   --log-to-mlflow / --no-log-to-mlflow  MLflow 記録の有無    [デフォルト: 記録しない]
+  --measured-bsdf PATH       BSDF 実測ファイル（.bsdf 等）
+                             config.yaml の measured_bsdf.path を上書き
+  --match-measured /         実測ファイルの条件を sim 条件に自動採用するか
+    --no-match-measured
+```
+
+**多条件 simulate**:
+`config.yaml` の `simulation.wavelength_um` / `theta_i_deg` / `mode` にスカラでもリストでも指定可能。
+リスト指定時は直積で展開され、1 run で複数条件の BSDF を計算する。
+
+```yaml
+simulation:
+  wavelength_um: [0.465, 0.525, 0.630]   # 3 波長
+  theta_i_deg: [0, 20, 40, 60]            # 4 入射角
+  mode: ['BRDF', 'BTDF']                  # 2 モード → 24 条件を実行
 ```
 
 **出力ファイル:**
 
 | ファイル | 内容 |
 |---|---|
-| `outputs/bsdf_data.parquet` | 計算結果（ロング形式、1行=1散乱点） |
+| `outputs/bsdf_data.parquet` | 計算結果（ロング形式、1行=1散乱点。実測 BSDF 指定時は `method='measured'` 行も含む） |
+
+**`--log-to-mlflow` 有効時の artifacts**:
+MLflow の当該 run に以下が自動保存される。
+- `data/bsdf_data.parquet`
+- `plots/surface.png` / `plots/surface.html`
+- `plots/bsdf_2d_<method>[条件サフィックス].png`
+- `plots/bsdf_report.html`（多条件時は Panel Tabs で条件別、実測データは黒点 Scatter オーバーレイ）
 
 ---
 
@@ -145,6 +167,76 @@ bsdf surface --config config.yaml --format html --output surface.html
 
 ---
 
+### `bsdf dashboard` — リアルタイム BSDF ダッシュボード
+
+config.yaml の `surface.model` に応じたブラウザダッシュボードを起動する。
+スライダーを動かすと BSDF が即時更新される（3 段階解像度、LRU キャッシュ）。
+`measured_bsdf.path` 指定時は 1D プロファイルに実測データが黒点オーバーレイされる。
+
+```
+bsdf dashboard [オプション]
+
+オプション:
+  -c, --config PATH             設定ファイルパス（YAML）    [必須]
+  -p, --port INTEGER            Panel サーバーポート        [デフォルト: 5006]
+  --host TEXT                   バインドアドレス            [デフォルト: localhost]
+                                0.0.0.0 で全インターフェース公開（他PCからアクセス可）
+  --preview-grid INTEGER        プレビュー計算グリッドサイズ [デフォルト: 512]
+  --no-browser                  起動時にブラウザを開かない
+```
+
+```bash
+# ローカルのみ（デフォルト）
+bsdf dashboard --config config.yaml
+
+# 他PCからもアクセス可能にする（ファイアウォールで 5006 番を開放すること）
+bsdf dashboard --config config.yaml --host 0.0.0.0
+
+# ブラウザから: http://<サーバのIPアドレス>:5006
+
+# Keyence VK-X 実測形状 + LightTools 実測 BSDF 比較
+bsdf dashboard --config sample_inputs/config_device_vk6.yaml
+```
+
+**ファイアウォール設定（他PCからアクセスする場合）:**
+
+| OS | コマンド / 手順 |
+|---|---|
+| Linux (ufw) | `sudo ufw allow 5006` |
+| Linux (firewalld) | `sudo firewall-cmd --add-port=5006/tcp --permanent && sudo firewall-cmd --reload` |
+| Windows | 「Windows Defender ファイアウォール」→「受信の規則」→「新しい規則」→ ポート 5006 (TCP) を許可 |
+| macOS | 「システム設定」→「ネットワーク」→「ファイアウォール」→ bsdf-sim を許可（または `pfctl` で 5006 を開放） |
+
+対応モデル: `RandomRoughSurface` / `SphericalArraySurface` / `MeasuredSurface` 系（`DeviceVk6Surface` 等）
+
+---
+
+### `bsdf runs list` — MLflow run 一覧表示
+
+optimize で大量 run を生成したあと、メトリクス順で確認し `run_id` のショートカット（short_id など）をコピーするためのコマンド。
+
+```
+bsdf runs list [オプション]
+
+オプション:
+  --tracking-uri TEXT           MLflow トラッキング URI       [デフォルト: mlruns]
+  -e, --experiment TEXT         実験名                       [デフォルト: 01_BSDF_Raw_Data]
+  -s, --sort-by TEXT            並び順の基準メトリクス名
+  --ascending/--descending      sort-by 指定時の昇順/降順     [デフォルト: ascending]
+  -n, --limit INTEGER           最大表示件数                 [デフォルト: 20]
+  -m, --metrics TEXT            表示列のカスタマイズ（カンマ区切り）
+```
+
+```bash
+# haze_fft 昇順で上位 10 件
+bsdf runs list --sort-by haze_fft --limit 10
+
+# 表示メトリクスをカスタム指定
+bsdf runs list -s sparkle_fft -m haze_fft,sparkle_fft --descending
+```
+
+---
+
 ### `bsdf visualize` — 結果の可視化
 
 ```
@@ -152,13 +244,24 @@ bsdf visualize [オプション]
 
 オプション:
   --run-id TEXT                 MLflow の run_id              [必須]
+                                完全 ID / latest / latest-N /
+                                best:METRIC[:max] / 8文字以上のプレフィックス可
   --tracking-uri TEXT           MLflow トラッキング URI      [デフォルト: mlruns]
+  -e, --experiment TEXT         run_id 解決時の実験名         [デフォルト: 01_BSDF_Raw_Data]
   -o, --output PATH             出力 HTML パス               [デフォルト: report.html]
   --scale [linear|log]          BSDF 軸スケール              [デフォルト: log]
+  --log-to-mlflow /             生成 HTML を元 run の
+    --no-log-to-mlflow           artifacts/plots/ に書き戻す  [デフォルト: no]
 ```
 
 ```bash
-bsdf visualize --run-id abc123ef --output bsdf_plot.html
+# 完全 run_id で
+bsdf visualize --run-id abc123ef01234567890abcdef01234567 --output bsdf_plot.html
+
+# ショートカット: 最新 / 最良 / プレフィックス
+bsdf visualize --run-id latest --log-to-mlflow
+bsdf visualize --run-id best:haze_fft --log-to-mlflow
+bsdf visualize --run-id abc123ef --log-to-mlflow   # 8 文字以上
 ```
 
 ---
@@ -178,6 +281,9 @@ bsdf report [オプション]
 ```bash
 bsdf report --run-ids abc123,def456,ghi789 --output compare.html
 ```
+
+`--log-to-mlflow`（デフォルト有効）の場合、`02_Analysis_Reports` 実験に新規 run が作成され、
+`params.source_run_ids`（カンマ区切りの比較対象 ID）と `artifacts/reports/comparison_report.html` が保存される。
 
 ---
 
@@ -501,7 +607,7 @@ pytest tests/ --cov=bsdf_sim --cov-report=html
 pytest tests/test_fft_bsdf.py -v
 ```
 
-現在のテスト数: **131件**（全 pass）
+現在のテスト数: **311件**（全 pass）
 
 | テストファイル | 対象 | テスト数 |
 |---|---|---|
@@ -531,4 +637,4 @@ pytest tests/test_fft_bsdf.py -v
 
 ## ライセンス
 
-本リポジトリのライセンスについてはリポジトリオーナーに確認すること。
+[MIT License](LICENSE) © 2025 bottmk
