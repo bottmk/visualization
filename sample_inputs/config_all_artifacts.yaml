@@ -75,6 +75,14 @@ adding_doubling:
 psd:
   approx_mode: false
 
+# ── FFT 法のモード切替 ───────────────────────────────────────────────────
+# 'tilt' (既定): 全半球カバーだがスペクトル漏れあり
+# 'output_shift': 漏れなし、但し θ_i 大で後方散乱側が欠損
+# 'zero': 垂直入射近似、θ_i 非依存の 1 回計算（最速）
+# 詳細: docs/fft_bsdf_math.md
+fft:
+  mode: 'tilt'
+
 # ── 実測 BSDF との比較 ─ bsdf_report.html に黒点オーバーレイ ──────────────
 measured_bsdf:
   path: 'sample_inputs/BRDF_BTDF_LightTools.bsdf'

@@ -168,6 +168,7 @@ def simulate(
                 n2=cond["n2"],
                 polarization=cond["polarization"],
                 is_btdf=is_btdf,
+                fft_mode=cfg.fft_mode,
             )
             method_bsdf_by_cond[cond_key]["fft"] = (u, v, bsdf_fft)
             if u_primary is None:
@@ -177,7 +178,7 @@ def simulate(
                 theta_i, cond["phi_i_deg"], wl_um, cond["polarization"],
                 is_btdf=is_btdf,
             ))
-            logger.info(f"          FFT 完了 ({_elapsed(t0)})")
+            logger.info(f"          FFT 完了 ({_elapsed(t0)}, mode={cfg.fft_mode})")
 
         if method in ("psd", "both"):
             t0 = time.perf_counter()
@@ -254,6 +255,7 @@ def simulate(
                 n2=primary_cond["n2"],
                 polarization=primary_cond["polarization"],
                 is_btdf=rep_is_btdf,
+                fft_mode=cfg.fft_mode,
             )
             method_bsdf_by_cond[rep_key]["fft"] = (u_r, v_r, bsdf_r)
             if u_primary is None:
@@ -696,6 +698,7 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
                 n1=cfg.n1,
                 n2=cfg.n2,
                 is_btdf=cfg.is_btdf,
+                fft_mode=cfg.fft_mode,
             )
             method_bsdf["fft"] = (u_f, v_f, bsdf_f)
             all_dfs.append(build_dataframe(

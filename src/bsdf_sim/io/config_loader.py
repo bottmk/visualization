@@ -349,6 +349,27 @@ class BSDFConfig:
         """sim 条件と実測ブロックのマッチング許容波長 [nm]。デフォルト 5.0nm。"""
         return float(self.measured_bsdf.get("tolerance_nm", 5.0))
 
+    # ── FFT 法のオプション ─────────────────────────────────────────────────
+
+    @property
+    def fft(self) -> dict[str, Any]:
+        return self._resolved.get("fft", {})
+
+    @property
+    def fft_mode(self) -> str:
+        """FFT 法の計算モード。'tilt'（既定）/ 'output_shift' / 'zero'。
+
+        詳細は docs/fft_bsdf_math.md の「3 つの fft_mode オプション」参照。
+        """
+        mode = str(self.fft.get("mode", "tilt"))
+        valid = ("tilt", "output_shift", "zero")
+        if mode not in valid:
+            raise ValueError(
+                f"config.fft.mode は {valid} のいずれかでなければならない。"
+                f"値={mode!r}"
+            )
+        return mode
+
     # ── 代表波長（規格準拠の Haze/Gloss/DOI 計算用）────────────────────────
 
     @property

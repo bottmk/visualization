@@ -357,3 +357,28 @@ class TestMeasuredBsdfConfig:
         })
         assert cfg.match_tolerance_deg == pytest.approx(2.5)
         assert cfg.match_tolerance_nm == pytest.approx(10.0)
+
+
+class TestFFTMode:
+    """config.fft.mode の読み込みとバリデーション。"""
+
+    def _base(self, **overrides):
+        cfg = {**_MINIMAL_CFG, **overrides}
+        return BSDFConfig(cfg)
+
+    def test_default_is_tilt(self):
+        assert self._base().fft_mode == "tilt"
+
+    def test_explicit_tilt(self):
+        assert self._base(fft={"mode": "tilt"}).fft_mode == "tilt"
+
+    def test_output_shift(self):
+        assert self._base(fft={"mode": "output_shift"}).fft_mode == "output_shift"
+
+    def test_zero(self):
+        assert self._base(fft={"mode": "zero"}).fft_mode == "zero"
+
+    def test_invalid_raises(self):
+        cfg = self._base(fft={"mode": "unknown"})
+        with pytest.raises(ValueError, match="fft.mode"):
+            _ = cfg.fft_mode

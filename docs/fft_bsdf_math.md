@@ -138,50 +138,138 @@ $$\boxed{\;\mathrm{BSDF}(u, v) \;=\; \frac{I(f_x, f_y)}{A \cdot \cos\theta_s \cd
 
 `compute_bsdf_fft(..., fft_mode=...)` で挙動を切替可能。既定値は `'tilt'`（後方互換）。
 
+すべてのモードで共通の最終式は
+
+$$\mathrm{BSDF}(u, v) \;=\; \frac{I(f_x, f_y)}{A \cdot \cos\theta_s \cdot \lambda^2} \quad [\mathrm{sr}^{-1}]$$
+
+違いは **(1) 複素振幅 $U$ の作り方** と **(2) 出力 $u_\text{grid}$ のラベル** の 2 点のみ。
+config.yaml からは `fft.mode` で指定できる（`simulate` / `dashboard` 双方で有効）。
+以下、BRDF モードで示します（BTDF も位相変換式が別になるだけで構造は同じ）。
+
 ### mode = 'tilt'（既定・現行方式）
-入力に $\varphi_\text{tilt}$ を加えて specular を (sin θ_i cos φ_i, sin θ_i sin φ_i) に配置。
 
-- ✅ 全半球カバー（θ_i に依らず $u \in [-\lambda/2dx, +\lambda/2dx)$）
-- ❌ $\sin\theta_i \cdot N \cdot dx / \lambda$ が非整数で **DFT スペクトル漏れ** が発生
+**表面位相**
+$$\varphi_\text{surface}(x, y) \;=\; \frac{4\pi}{\lambda}\, n_1 \, h(x, y) \, \cos\theta_i$$
 
-### mode = 'output_shift'（漏れなし）
-tilt を使わず、出力 `u_grid` ラベルを $u_\text{spec}$ だけシフト。
+**傾き位相**（斜入射を shift invariance で normal-incidence 形式に揃える線形ランプ）
+$$\varphi_\text{tilt}(x, y) \;=\; k\, n_1 \sin\theta_i \bigl(\cos\phi_i\, x + \sin\phi_i\, y\bigr)$$
 
-- ✅ tilt 漏れが構造的に発生しない（前方散乱側で精度高）
-- ❌ $u$ の格子範囲が $[-\lambda/2dx + u_\text{spec},\ +\lambda/2dx + u_\text{spec})$ にシフトし、**θ_i が大きいと後方散乱側が欠落**
-- 条件: $dx \leq \lambda / \bigl(2(1 + |\sin\theta_i|)\bigr)$
+**複素振幅**
+$$U(x, y) \;=\; \exp\!\Bigl[\, j\bigl(\varphi_\text{surface} + \varphi_\text{tilt}\bigr)\Bigr]$$
+
+**出力格子**
+$$u_\text{grid} = f_x \lambda, \quad v_\text{grid} = f_y \lambda$$
+
+**性質**: 傾き項の空間周波数は $f_\text{tilt} = n_1 \sin\theta_i / \lambda$。これが FFT 格子点 $m/(N\cdot dx)$ と一致するためには
+
+$$\frac{\sin\theta_i \cdot N \cdot dx}{\lambda} \in \mathbb{Z}$$
+
+を満たす必要がある。満たさない場合、DFT の巡回周期性が破れて sinc 型の**スペクトル漏れ**が生じる。
+
+- ✅ 全半球カバー（$u \in [-\lambda/2dx,\, +\lambda/2dx)$、θ_i 非依存）
+- ❌ 一般の θ_i で漏れ発生（小粗さほど相対的に支配的）
+
+### mode = 'output_shift'（漏れなし・格子シフト）
+
+**表面位相**（tilt と同じ）
+$$\varphi_\text{surface}(x, y) \;=\; \frac{4\pi}{\lambda}\, n_1 \, h(x, y) \, \cos\theta_i$$
+
+**傾き項は使わない**
+$$U(x, y) \;=\; \exp(j\varphi_\text{surface})$$
+
+**出力格子にだけシフトを加える**
+$$u_\text{grid} = f_x \lambda + n_1 \sin\theta_i \cos\phi_i$$
+$$v_\text{grid} = f_y \lambda + n_1 \sin\theta_i \sin\phi_i$$
+
+**等価性の証明**: convolution theorem より
+
+$$\mathcal{F}\bigl[e^{j\varphi_\text{surface}} \cdot e^{j\varphi_\text{tilt}}\bigr](f) \;=\; \mathcal{F}\bigl[e^{j\varphi_\text{surface}}\bigr](f - f_\text{tilt})$$
+
+従って、tilt 方式で周波数 $f$ にある値は output_shift 方式で $f - f_\text{tilt}$ にある値と等しい。$u$ 座標系ではこれは「出力ラベルを $+u_\text{spec}$ だけシフト」に相当する。**連続関数的には同一の物理量**を指す。
+
+**なぜ漏れなくなるのか**: tilt は $e^{j\varphi_\text{tilt}}$ を離散サンプリングする段階で、非整数周波数のため標本終端に位相不連続（段差）ができる。output_shift は $U = e^{j\varphi_\text{surface}}$ のみで、$h(x, y)$ は周期境界が整う（FFT の周期延長と両立）ため段差が生じない。
+
+**覆う範囲のシフト**: FFT 格子 $f \in [-1/(2dx),\, +1/(2dx))$ を $u$ 空間に写像すると
+
+$$u \in \left[-\frac{\lambda}{2dx} + u_\text{spec},\ +\frac{\lambda}{2dx} + u_\text{spec}\right)$$
+
+物理的に有効な $u \in [-1, +1]$ 全体を覆うためには
+
+$$dx \;\leq\; \frac{\lambda}{2(1 + |\sin\theta_i|)}$$
+
+を満たす必要がある。満たせない場合、**後方散乱側が格子外**になり BSDF が計算されない。
+
+| θ_i | dx の上限 (λ=0.55) |
+|---|---|
+| 0° | 0.275 μm |
+| 20° | 0.205 |
+| 45° | 0.161 |
+| 60° | 0.147 |
+| 80° | 0.141 |
+
+- ✅ 漏れ構造的にゼロ、specular も物理的に正しい位置
+- ❌ 大 θ_i で後方散乱欠損（dx を小さくする以外に解消策なし）
 
 ### mode = 'zero'（垂直入射近似・θ_i 非依存）
-$\cos\theta_i \to 1$, $\sin\theta_i \to 0$ を代入。θ_i によらず 1 回の FFT で計算。
 
-- ✅ 1 回計算で θ_i 無限通り使える（最速）、漏れなし、全半球カバー
-- ❌ specular は常に (0, 0)。θ_i 依存は物理的に失われる
-- 用途: パターン形状の参考表示、小角度（< 10°）の近似、教育目的
+**全ての θ_i で normal-incidence 位相を使用**
 
-### 比較サマリ
+BRDF:
+$$\varphi_\text{surface}^{(0)}(x, y) \;=\; \frac{4\pi}{\lambda}\, n_1 \, h(x, y)$$
+
+BTDF:
+$$\varphi_\text{surface}^{(0)}(x, y) \;=\; \frac{2\pi}{\lambda}\, (n_2 - n_1)\, h(x, y)$$
+
+**傾き項もオフセットもなし**
+$$U(x, y) \;=\; \exp(j\varphi_\text{surface}^{(0)})$$
+$$u_\text{grid} = f_x \lambda,\quad v_\text{grid} = f_y \lambda$$
+
+**近似の本質**:
+
+- $\cos\theta_i \to 1$: 表面粗さの $\cos\theta_i$ 倍投影効果を無視
+- $\sin\theta_i \to 0$: specular を常に原点に固定（tilt ラベルシフトも無し）
+
+Rayleigh-Rice 線形域では、tilt の結果を $\cos^2\theta_i$ で割って $(u_\text{spec}, v_\text{spec})$ だけシフトすると zero の結果とほぼ一致する（形状として）。
+
+**誤差の上限**: 小粗さ（$Rq \cos\theta_i \ll \lambda/8$）では $\cos^2\theta_i$ 倍の振幅差のみ → log スケールで $\log_{10}\cos^2\theta_i$ のシフト（θ_i=60° で −0.6 dec）。大粗さでは非線形項 $O(\varphi^4)$ が効き、形状そのものが乖離する。
+
+- ✅ θ_i に依らず結果が同じ → **1 回の FFT で全 θ_i に使い回せる**（最速）
+- ✅ 漏れなし、全半球カバー
+- ❌ θ_i 依存が完全に失われる（物理的に θ_i ≠ 0 では誤り）
+- ❌ specular 方向が (0, 0) に固定（実測との角度一致比較に不適）
+
+### 並列比較
 
 | 観点 | tilt | output_shift | zero |
 |---|---|---|---|
-| specular 位置 | 物理的に正しい | 物理的に正しい | 常に (0, 0) |
-| 漏れ | あり | なし | なし |
+| 表面位相の $\cos\theta_i$ | あり | あり | **なし** ($=1$) |
+| 傾き項 $\varphi_\text{tilt}$ | あり | なし | なし |
+| $u_\text{grid}$ オフセット | 0 | $+u_\text{spec}$ | 0 |
+| specular 位置 | $(u_\text{spec}, v_\text{spec})$ | 同左 | **$(0, 0)$** 固定 |
+| 漏れ | あり（非整数 θ_i で） | なし | なし |
 | 半球カバー | 常に完全 | θ_i 大で片側欠損 | 常に完全 |
-| θ_i 依存性 | 厳密 | 厳密 | なし（近似） |
+| θ_i 依存性 | 厳密 | 厳密 | **なし**（近似） |
 | 必要 $dx$ | $\leq \lambda/2$ | $\leq \lambda/\bigl(2(1+\|\sin\theta_i\|)\bigr)$ | $\leq \lambda/2$ |
-| 再利用 | 条件ごと計算 | 条件ごと計算 | 1 回で全 θ_i |
+| 再利用 | 条件ごと FFT | 条件ごと FFT | **1 回で全 θ_i** |
 
 ### 使い分けガイド
 
-| 用途 | 推奨 mode |
-|---|---|
-| 後方互換（既存コード） | `tilt`（省略可） |
-| 前方散乱・specular 近傍の精密比較 | `output_shift` |
-| パターン形状のみ必要・最速計算 | `zero` |
-| 実測との定量一致（小粗さ） | PSD 法と併用 |
+| 用途 | 推奨 mode | 理由 |
+|---|---|---|
+| 後方互換（既存コード） | `tilt` | 既定値・API 互換 |
+| 前方散乱・specular 近傍の精密比較 | `output_shift` | 漏れなし、specular 正確 |
+| 後方散乱 (retro-reflection) が必要 | `tilt` | output_shift は格子外で取れない |
+| パターン形状のみ必要・最速計算 | `zero` | 1 FFT で全 θ_i 共有 |
+| 実測との定量一致（小粗さ） | PSD 法と併用 | FFT 系は Fresnel・振幅に限界 |
+| Optuna 最適化の高速評価 | `zero` | trial 数を稼げる |
 
 ### 実装参照
+
 - 実装: `src/bsdf_sim/optics/fft_bsdf.py`
+- config 経由の指定: `config.yaml` の `fft.mode`（`simulate`, `dashboard` 共通）
 - デモ: `outputs/_demo_fft_modes.py` → `outputs/fft_modes_comparison.png`
-- テスト: `tests/test_fft_bsdf.py::TestFFTModes`
+  （RandomRough + SphericalArray の 2 行で視覚比較）
+- テスト: `tests/test_fft_bsdf.py::TestFFTModes`, `tests/test_config_loader.py::TestFFTMode`
 
 ---
 

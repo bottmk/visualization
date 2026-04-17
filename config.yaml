@@ -59,6 +59,19 @@ adding_doubling:
 psd:
   approx_mode: false            # false=完全形（Elson-Bennett）/ true=簡略形（Stover、高速）
 
+# ── FFT法オプション ───────────────────────────────────────────────────────────
+# fft.mode: 'tilt' (既定) / 'output_shift' / 'zero'
+#   - tilt:         入力に位相傾き項を加え specular を正しい (u,v) に配置。
+#                   全半球カバーだが sin(θ_i)·N·dx/λ が非整数で漏れが出る。
+#   - output_shift: 出力 u_grid のラベルだけシフト。漏れなし、前方散乱の精度高。
+#                   θ_i が大きいと後方散乱側が格子範囲から外れて欠損する。
+#                   条件: dx ≤ λ/(2·(1 + |sin θ_i|))
+#   - zero:         垂直入射近似（cos θ_i=1, sin θ_i=0）。θ_i 非依存で 1 回計算。
+#                   specular は常に (0,0)。パターン形状のみ必要な用途・最速計算用。
+# 詳細は docs/fft_bsdf_math.md 参照。
+fft:
+  mode: 'tilt'
+
 # ── 誤差計算 ──────────────────────────────────────────────────────────────────
 error_metrics:
   bsdf_floor: 1.0e-6            # sr⁻¹ 装置のノイズフロアに合わせて変更

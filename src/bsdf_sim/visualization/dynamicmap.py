@@ -218,6 +218,7 @@ class _BaseBSDFDashboard(ABC):
         measured_dfs: list[pd.DataFrame] | None = None,
         measured_tolerance_deg: float = 1.0,
         measured_tolerance_nm: float = 5.0,
+        fft_mode: str = "tilt",
     ) -> None:
         _check_holoviews()
         self.wavelength_um = wavelength_um
@@ -231,6 +232,7 @@ class _BaseBSDFDashboard(ABC):
         self.measured_dfs = measured_dfs or []
         self.measured_tolerance_deg = measured_tolerance_deg
         self.measured_tolerance_nm = measured_tolerance_nm
+        self.fft_mode = fft_mode
 
         # 条件に一致する実測ブロックを事前抽出
         self._matched_meas_df: pd.DataFrame | None = None
@@ -265,6 +267,7 @@ class _BaseBSDFDashboard(ABC):
             phi_i_deg=self.phi_i_deg,
             n1=self.n1, n2=self.n2,
             is_btdf=self.is_btdf,
+            fft_mode=self.fft_mode,
         )
 
     def _measured_profile(self) -> tuple[np.ndarray, np.ndarray] | None:
@@ -361,6 +364,7 @@ def _compute_bsdf_random_rough(
     n2: float,
     is_btdf: bool,
     seed: int,
+    fft_mode: str = "tilt",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """キャッシュなし BSDF 計算（RandomRoughSurface、内部用）。"""
     model = RandomRoughSurface(
@@ -371,7 +375,7 @@ def _compute_bsdf_random_rough(
     return compute_bsdf_fft(
         height_map=hm, wavelength_um=wavelength_um,
         theta_i_deg=theta_i_deg, phi_i_deg=phi_i_deg,
-        n1=n1, n2=n2, is_btdf=is_btdf,
+        n1=n1, n2=n2, is_btdf=is_btdf, fft_mode=fft_mode,
     )
 
 
@@ -390,6 +394,7 @@ def _compute_bsdf_spherical(
     n2: float,
     is_btdf: bool,
     seed: int,
+    fft_mode: str = "tilt",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """キャッシュなし BSDF 計算（SphericalArraySurface、内部用）。"""
     model = SphericalArraySurface(
@@ -402,7 +407,7 @@ def _compute_bsdf_spherical(
     return compute_bsdf_fft(
         height_map=hm, wavelength_um=wavelength_um,
         theta_i_deg=theta_i_deg, phi_i_deg=phi_i_deg,
-        n1=n1, n2=n2, is_btdf=is_btdf,
+        n1=n1, n2=n2, is_btdf=is_btdf, fft_mode=fft_mode,
     )
 
 
@@ -451,6 +456,7 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             n1=self.n1, n2=self.n2,
             is_btdf=self.is_btdf,
             seed=self.random_seed,
+            fft_mode=self.fft_mode,
         )
 
     def create_dashboard(
@@ -590,6 +596,7 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             n1=self.n1, n2=self.n2,
             is_btdf=self.is_btdf,
             seed=self.random_seed,
+            fft_mode=self.fft_mode,
         )
 
     def create_dashboard(
@@ -813,6 +820,7 @@ def create_dashboard_from_config(
         is_btdf=cfg.is_btdf,
         pixel_size_um=float(surface_cfg.get("pixel_size_um", 0.25)),
         preview_grid_size_idle=preview_grid_size_idle,
+        fft_mode=cfg.fft_mode,
     )
 
     # 実測 BSDF ファイルの読み込み

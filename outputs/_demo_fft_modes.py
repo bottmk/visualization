@@ -1,11 +1,14 @@
 """Compare three FFT modes (tilt / output_shift / zero) side by side.
 
-Produces a 3x4 grid (3 modes x 4 theta_i values) of BSDF profiles on v=0 slice
-in relative coordinates (u - u_spec).
+Produces a 2x3 figure:
+  Row 1: RandomRoughSurface  (Rq=20nm)        - small-roughness regime
+  Row 2: SphericalArraySurface (R=5um,P=10um) - structured/anisotropic surface
 
-- tilt:         current default. full hemisphere coverage but has spectral leakage.
+Each row has 3 columns (one per mode), and 4 curves per axis (theta_i sweep).
+
+- tilt:         current default. full hemisphere but has spectral leakage.
 - output_shift: no leakage, but back-scatter side missing at large theta_i.
-- zero:         normal-incidence approximation. theta_i-independent, same curve.
+- zero:         normal-incidence approximation. theta_i-independent.
 """
 
 from __future__ import annotations
@@ -21,19 +24,17 @@ import numpy as np
 warnings.filterwarnings("ignore")
 
 from bsdf_sim.models.random_rough import RandomRoughSurface
+from bsdf_sim.models.spherical_array import SphericalArraySurface
 from bsdf_sim.optics.fft_bsdf import compute_bsdf_fft
 
 OUT = Path(__file__).parent / "fft_modes_comparison.png"
 
 WAVELENGTH_UM = 0.55
-RQ_UM = 0.02           # 20 nm (intermediate)
-LC_UM = 2.0
 GRID_SIZE = 512
-PIXEL_UM = 0.15        # small enough for output_shift at theta_i up to ~70 deg
+PIXEL_UM = 0.15     # small enough for output_shift up to theta_i ≈ 70 deg
 
 THETA_I_LIST = [0.0, 20.0, 45.0, 60.0]
 MODES = ["tilt", "output_shift", "zero"]
-MODE_COLORS = {"tilt": "tab:blue", "output_shift": "tab:orange", "zero": "tab:green"}
 
 
 def extract_phi0_slice(u_grid: np.ndarray, bsdf: np.ndarray):
@@ -44,15 +45,7 @@ def extract_phi0_slice(u_grid: np.ndarray, bsdf: np.ndarray):
     return u_axis[order], np.maximum(bsdf_row[order], 1e-12)
 
 
-def main() -> None:
-    surface = RandomRoughSurface(
-        grid_size=GRID_SIZE, pixel_size_um=PIXEL_UM,
-        rq_um=RQ_UM, lc_um=LC_UM, fractal_dim=2.5, seed=42,
-    )
-    hm = surface.get_height_map()
-
-    fig, axes = plt.subplots(1, 3, figsize=(17, 5.2), sharey=True)
-
+def plot_row(axes, hm, title_suffix: str) -> None:
     for ax, mode in zip(axes, MODES):
         for ti_deg in THETA_I_LIST:
             u_grid, _, bsdf = compute_bsdf_fft(
@@ -67,18 +60,40 @@ def main() -> None:
 
         ax.set_yscale("log")
         ax.set_xlim(-1.1, 1.1)
-        ax.set_xlabel("u - u_spec  (relative direction cosine)")
-        ax.set_title(f"mode = '{mode}'")
+        ax.set_xlabel("u - u_spec")
+        ax.set_title(f"{title_suffix}  |  mode = '{mode}'", fontsize=10)
         ax.grid(True, which="both", alpha=0.3)
         ax.axvline(0, color="gray", linestyle=":", linewidth=0.8)
-        ax.legend(loc="upper right", fontsize=9)
+        ax.legend(loc="upper right", fontsize=8)
 
-    axes[0].set_ylabel("BSDF [1/sr]")
+
+def main() -> None:
+    # ── Row 1: RandomRoughSurface ─────────────────────────────────────────
+    rough = RandomRoughSurface(
+        grid_size=GRID_SIZE, pixel_size_um=PIXEL_UM,
+        rq_um=0.02, lc_um=2.0, fractal_dim=2.5, seed=42,
+    )
+    hm_rough = rough.get_height_map()
+
+    # ── Row 2: SphericalArraySurface ──────────────────────────────────────
+    spherical = SphericalArraySurface(
+        grid_size=GRID_SIZE, pixel_size_um=PIXEL_UM,
+        radius_um=5.0, pitch_um=10.0, base_height_um=0.0,
+        placement="Hexagonal", overlap_mode="Maximum", seed=42,
+    )
+    hm_sph = spherical.get_height_map()
+
+    fig, axes = plt.subplots(2, 3, figsize=(17, 10), sharey="row")
+
+    plot_row(axes[0], hm_rough, "RandomRough Rq=20nm lc=2um")
+    plot_row(axes[1], hm_sph, "SphericalArray R=5um P=10um Hex")
+
+    axes[0, 0].set_ylabel("BSDF [1/sr]")
+    axes[1, 0].set_ylabel("BSDF [1/sr]")
 
     fig.suptitle(
-        f"FFT mode comparison (v=0 slice, relative coords)  |  "
-        f"RandomRough Rq={RQ_UM*1000:.0f}nm, lc={LC_UM}um, "
-        f"N={GRID_SIZE}, dx={PIXEL_UM}um, lambda={WAVELENGTH_UM*1000:.0f}nm, BRDF",
+        f"FFT mode comparison (v=0 slice, relative coords, BRDF)  |  "
+        f"N={GRID_SIZE}, dx={PIXEL_UM}um, lambda={WAVELENGTH_UM*1000:.0f}nm",
         fontsize=12,
     )
     fig.tight_layout()
