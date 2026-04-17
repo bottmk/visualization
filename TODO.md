@@ -17,6 +17,8 @@
 | x | 高 | dashboard Y軸範囲固定機能 | グラフの Y 軸範囲を固定する機能（チェックボックスなどで ON/OFF 切替） | `src/bsdf_sim/visualization/dynamicmap.py` |
 | x | 高 | dashboard X軸目盛の自動設定 | リニア表示の補助目盛 5°刻み、主目盛（目盛り数値）10°刻みなど半端でない値にする | `src/bsdf_sim/visualization/dynamicmap.py` |
 | x | 高 | `bsdf dashboard --host 0.0.0.0` 到達不能 | 起動時に自動ブラウザで "このページに到達できません" エラー。Chrome は `0.0.0.0` URL を解決不可 | spec_main.md Section 10.1 BUG-008 |
+||高| dashboard X軸もリニア、対数切り替え|||
+||高| mlflow artifacts serface.pngの表示サイズ変更|サイズが大きすぎて、ブラウザスクロールが必要なので、表示サイズを50%に。元画像のサイズはできれば変更なし。||
 
 ---
 
