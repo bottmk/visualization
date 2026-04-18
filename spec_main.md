@@ -194,6 +194,59 @@ $$\phi_{\text{tilt}}(x) = \frac{2\pi}{\lambda} n_1 \sin\theta_i \cdot x$$
    - 実測データとシミュレーション結果を比較する際も、このUV座標上で補間（サンプリング）を行うことで、天頂（極）付近での座標の歪みを防ぎ、高精度なマッチングを実現する。
 4. **警告システム**: 偏光（S/P）が指定され、かつ広角（約30°以上）への散乱を計算する場合、スカラー近似の限界を超えているため誤差が大きくなる旨の警告をロギングする。
 
+#### FFT 法の数値限界
+
+FFT 法は離散化・スカラー近似・DFT 有限格子の 3 要因から以下の数値限界を持つ。使用者は BSDF の計算範囲・精度が限界内に収まっているか、`fft_mode` 選択とグリッドパラメータから事前に確認する必要がある。
+
+##### (1) 空間サンプリング限界（ピクセルサイズ `dx`）
+
+FFT で得られる空間周波数の最大値は Nyquist 周波数 $f_{\max} = 1/(2\,dx)$ であり、方向余弦では $u_{\max} = \lambda/(2\,dx)$ となる。半球全体（$|u|, |v| \leq 1$）をカバーする条件はモードによって異なる:
+
+| モード | 条件 | 超過時の挙動 |
+|---|---|---|
+| `tilt`（既定） | $dx \leq \lambda/2$ | u 軸の中心は常に $u = 0$。条件超過で aliasing（折り返し） |
+| `output_shift` | $dx \leq \lambda/(2(1+\lvert\sin\theta_i\rvert))$ | 条件超過で半球の後方散乱側（`u < -1 + 2u_{\max}`）が FFT 格子外に欠損 |
+| `zero`（垂直入射近似） | $dx \leq \lambda/2$ | `tilt` と同じだが specular は常に原点 |
+
+具体例: $\lambda = 0.55\ \mu m$, $\theta_i = 60°$ の場合、`output_shift` では $dx \leq 0.55/(2 \cdot 1.866) \approx 0.147\ \mu m$ が必要。
+
+##### (2) 角度分解能（グリッドサイズ `N`）
+
+方向余弦空間の刻みは $\Delta u = \lambda/(N\,dx)$。散乱天頂角の分解能は $\Delta\theta_s \approx \Delta u / \cos\theta_s$ となるため、grazing（$\theta_s \to 90°$）では $1/\cos\theta_s$ の発散により実質分解能が大きく劣化する。
+
+具体例: $\lambda = 0.55\ \mu m$, $dx = 0.55\ \mu m$, $N = 512$ → $\Delta u \approx 1.95 \times 10^{-3}$、specular 付近で $\Delta\theta_s \approx 0.11°$、$\theta_s = 80°$ では $\Delta\theta_s \approx 0.65°$。
+
+##### (3) DFT スペクトル漏れ（`tilt` モード特有）
+
+`tilt` モードは入力 $U(x,y)$ に傾き位相 $\exp(i\,k\,n_1\sin\theta_i \cdot x)$ を掛ける。DFT の周期性と一致しない傾きは周期不一致による sidelobe（スペクトル漏れ）を発生させる。
+
+- 漏れを最小化する条件: $n_1 \sin\theta_i \cdot N\,dx / \lambda$ が整数（specular 位置が FFT bin 中心に一致）。
+- 窓関数（Hann/Blackman 等）の適用による裾野抑制は未実装（将来課題）。
+- `output_shift` は入力を傾けないため漏れは発生しないが、(1) のカバレッジ欠損リスクを伴う。
+
+##### (4) スカラー近似の限界（偏光・広角）
+
+FFT 法は位相のみで表面を表現するため、偏光依存（S/P 成分比）と $\theta_i \times \theta_s$ 依存のフレネル反射率は含まれない。
+
+- **広角警告**: 偏光指定（S/P）かつ $\theta_s > 30°$ の計算時にログ警告を出力する。
+- **apply_fresnel オプション**: $\theta_i$ 依存のフレネル反射/透過率（Unpolarized では $(|r_s|^2+|r_p|^2)/2$）を BSDF 全体に後掛けするヒューリスティック補正。$\theta_s$ 依存性は含まれない。
+- 偏光依存 BSDF の厳密計算には **PSD 法**（Rayleigh-Rice、Appendix A の偏光因子 Q）を使用する。
+
+##### (5) Kirchhoff 近似（スカラー回折）の前提
+
+FFT 法の位相変換式はスカラー Kirchhoff 近似に基づき、以下を前提とする:
+
+- 表面勾配 $|\nabla h| \ll 1$（緩やかな凹凸、傾斜角 $\lesssim 20°$ 程度）
+- 構造の曲率半径 $\gg \lambda$（サブ波長構造は扱えない）
+- 多重散乱・shadowing / masking は考慮しない
+- RMS 高さ $h_{\text{rms}} \lesssim \lambda/(4\pi\cos\theta_i)$ を大きく超える場合、位相が $2\pi$ を跨ぎ（phase wrapping）非物理的な干渉パターンが生じる可能性あり
+
+##### (6) 計算コスト・メモリ
+
+- **計算量**: $O(N^2 \log N)$（2 次元 FFT）。参考: $N = 1024$ で約 1 秒、$N = 4096$ で約 20〜30 秒（float64、単一波長・単一入射角）。
+- **メモリ**: $N \times N$ の complex128 配列で $16 N^2$ byte。$N = 4096$ で約 268 MB。
+- 多波長・多入射角の直積計算は条件数に比例して線形に増加する（BUG-004 で sparkle のベクトル化は完了済み、FFT 本体は条件ループで並列化はしていない）。
+
 ### 3.3. PSD法（Rayleigh-Rice理論近似）ルート
 1. $h(x,y)$ の2次元FFTからパワースペクトル密度 $PSD(f_x, f_y)$ を算出する。
 2. BRDFモード・BTDFモードおよび偏光状態（S/P/Unpolarized）に応じた偏光因子 $Q$ を算出し、BSDFを導出する。$Q$ の完全形はAppendix Aに記載する。
@@ -1178,8 +1231,9 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 
 | 日付 | 変更内容 | 対応コミット |
 |---|---|---|
+| 2026-04-18 | **spec_main.md に「FFT 法の数値限界」セクションを追加**（ドキュメントのみ、挙動変更なし）: Section 3.2 末尾に `#### FFT 法の数値限界` サブセクションを新設。`fft_bsdf.py` の実装と整合させて 6 項目を整理 — (1) 空間サンプリング限界（モード別 dx 条件の表: `tilt` / `output_shift` / `zero`）、(2) 角度分解能 $\Delta u = \lambda/(N\,dx)$ と grazing 発散、(3) `tilt` モード特有の DFT スペクトル漏れ（窓関数未実装と記載）、(4) スカラー近似の限界（偏光・広角 30° 警告、`apply_fresnel` ヒューリスティック）、(5) Kirchhoff 近似の前提（勾配・曲率・多重散乱・phase wrapping）、(6) 計算コスト・メモリ（$N=4096$ で ~268 MB・~20〜30 秒） | 本コミット |
 | 2026-04-18 | **BSDF 指標オーバーレイを simulate/visualize/dashboard に統合**（機能追加、後方互換）: Phase 1〜3 で実装した `overlay_all_metrics_2d` を CLI 3 経路から利用可能に。(A) `plot_bsdf_2d_heatmap` / `_build_condition_panel` / `plot_bsdf_report` に `metrics_config` / `metric_overlay_config` / `theta_i_deg` / `mode` / `n1` / `n2` 引数を伝播。`metric_overlay_config.show_overlay=True` かつ `metrics_config` 提供時のみ overlay 適用（両方が None の場合は従来通り素の heatmap）。(B) `BSDFConfig.metric_overlay` プロパティを追加し `config.visualization.metric_overlay` 辞書を読み込む。(C) `bsdf simulate` が `cfg._raw["metrics"]` と `cfg.metric_overlay` を `plot_bsdf_report` に渡すよう修正、`bsdf_report.html` に overlay が自動反映。(D) `bsdf visualize` に `--config`/`-c` と `--show-metric-overlay/--no-show-metric-overlay` CLI オプションを追加（config 未指定時は overlay 無効、CLI フラグで `show_overlay` を上書き可能）。(E) `_BaseBSDFDashboard.__init__` に `metrics_config`/`metric_overlay_config` を追加、`_make_2d_heatmap_with_overlay` ヘルパ経由で全 3 dashboard（RandomRough/Spherical/Measured）の `update_plot` が `pn.Row(plot_1d, plot_2d)` を返すよう変更。`create_dashboard_from_config` が config から自動伝播。テスト 407→415 件（`TestPlotBsdf2DHeatmapWithOverlay` 4 件等追加） | 本コミット |
-| 2026-04-18 | **Sparkle 拡張レベル L3'/L4/L5 実装追加**（機能追加、後方互換）: `src/bsdf_sim/metrics/sparkle_extended.py` を新設し、`docs/sparkle_approximation_levels.md` に定義した拡張レベルを実装。(A) `compute_sparkle_l3prime(height_map, color, config, ...)` — 単色表示（サブピクセル限定発光 + 単波長）、(B) `compute_sparkle_l4(height_map, config, ...)` — 白点灯（R/G/B サブピクセル + V(λ) 重み、narrowband 近似）、(C) `compute_sparkle_l5(height_map, color, config, window_size_factor=3.0, ...)` — 空間分解 BSDF（Hann 窓付き FFT、画素ごとに局所 BSDF を計算）。HeightMap 入力・μm 単位統一。L1 `compute_sparkle` は BSDF 入力のまま温存（後方互換）。CIE 1931 V(λ) テーブルと色別代表波長（R=630/G=525/B=465 nm）を同モジュール内に実装。L5 は DC 集中・サブピクセル Moiré アーティファクトを回避するため物理的に妥当な Cs 値を返すが、L3'/L4 は角度ビニング手法の性質上 DC 近傍集中による高 Cs となり**相対比較用途**（規格値の代替ではない）である点を docstring に明記。CLI/simulate パイプライン統合は未実装（将来拡張）。テスト 407→432 件（TestSubpixelMask/TestVLambda/TestCsFromLuminance/TestSparkleL3Prime/TestSparkleL4/TestSparkleL5 計 25 件追加） | 本コミット |
+| 2026-04-18 | **Sparkle 拡張レベル L3'/L4/L5 実装 + pupil 角度積分 + 用語集 + 警告強化**（機能追加、後方互換）: `src/bsdf_sim/metrics/sparkle_extended.py` を新設し `docs/sparkle_approximation_levels.md` に定義した拡張レベルを実装。(A) `compute_sparkle_l3prime` — 単色表示（サブピクセル限定発光 + 単波長）、(B) `compute_sparkle_l4` — 白点灯（R/G/B サブピクセル + V(λ) 重み、narrowband 近似）、(C) `compute_sparkle_l5(..., pupil_integration=True, ...)` — 空間分解 BSDF（Hann 窓付き FFT、画素ごとの局所 BSDF、瞳孔立体角積分対応）。HeightMap 入力、μm 単位。L1 `compute_sparkle` は BSDF 入力のまま温存（後方互換）。CIE 1931 V(λ) テーブルと色別代表波長（R=630/G=525/B=465 nm）を同モジュール内に実装。L5 は DC 集中・サブピクセル Moiré アーティファクトを回避するため物理的に妥当な Cs を返すが、L1/L3'/L4 は角度ビニング方式の性質上 DC 近傍集中による apparent Cs が実測の 100–10000× になる（**規格値の代替ではなく相対比較用途**）。この注意を各関数の docstring と `docs/sparkle_calculation.md` の警告ブロックに明記。併せて同ドキュメント Section 9 に用語集（ビン/pupil/DC 成分/窓付き FFT/reciprocity/統計記号・光学・ディスプレイ関連 計 20+ 用語）を追加。CLI/simulate パイプライン統合は未実装（将来拡張）。テスト 407→434 件（+27：TestSubpixelMask/TestVLambda/TestCsFromLuminance/TestSparkleL3Prime/TestSparkleL4/TestSparkleL5（pupil 積分 2 件含む）） | 本コミット |
 | 2026-04-18 | **DOI-COMB overlay の意味論修正 + 1D overlay 追加**: (1) 外枠長方形のラベルを「scan band」→「beam window」に変更し、docstring を全面改訂して「`scan_half_angle_deg` はビーム像の角度範囲（受光窓）、くし本体の移動は周期 period_u=2·d/distance [rad] の 1 周期分だけ」と明記。誤解を招く「走査範囲」表現を排除。(2) `show_imin_phase=True` で Imax 位相（明中心=u_center）に加え Imin 位相（半周期ずらし、破線）も重ね表示可能に。(3) 縞ラベルに「ビーム窓に入るスリット数 ~2·u_half/period_u」を併記（幅が細いほど多く、太いほど少ない）。(4) 新関数 `overlay_doi_comb_1d(curve_overlay, theta_axis_deg, ...)` を追加、1D BSDF 角度プロファイル（θ_s vs BSDF）にくし縞を縦帯として重ねる。`outputs/_demo_metric_overlays.py` に 1D 出力 `demo_metric_overlays_1d.png` を追加。テスト 383→394 件 | 本コミット |
 | 2026-04-18 | **副軸ユニットを config.yaml / CLI 対応**（機能拡張、既定値変更なし）: (A) `BSDFConfig.secondary_x_unit` プロパティを追加し、`config.visualization.secondary_x_unit` を `'lambda_scale'`（既定）/ `'u'` / `'f'` / `'k_x'` / `'theta_s'` から選択可能に。不正値は `ValueError`。(B) CLI `bsdf simulate` と `bsdf visualize` に `--secondary-x-unit` オプションを追加（`simulate` は None 既定で config を尊重、`visualize` は直接選択）。simulate の `bsdf_report.html` 生成と visualize の HTML 出力の両方で反映。(C) `_BaseBSDFDashboard.__init__` に `secondary_x_unit_default` 引数を追加、`create_dashboard_from_config` が `cfg.secondary_x_unit` を渡すことで dashboard の Select ウィジェット初期値に config が反映される。テスト 398→407 件（+9、TestSecondaryXUnit 7 件 + 関連整理） | 本コミット |
 | 2026-04-18 | **DOI-COMB overlay をくし縞（5 幅分）に拡張**（API 変更あり）: JIS K 7374 は 5 種類のくし幅 [0.125, 0.25, 0.5, 1.0, 2.0] mm で各くしの明暗信号から Imax/Imin コントラストを算出する仕組みなので、`overlay_doi_comb_2d` を「走査帯 + 最小くし幅の pitch バー数本」から「走査帯 + 各くし幅の明スリット群（duty 50%、period_u=2·d/distance）」に差し替え。くし幅 1 種類ごとに 1 レイヤー（凡例クリックで個別切替可能）、5 色グラデーション（0.125mm=淡オレンジ →2.0mm=濃赤）。API 変更: `show_pitch_bars`/`style_scan`/`style_pitch` 廃止、`show_stripes=True`/`stripe_alpha=0.25` 追加。`_apply_visibility` を COMB 縞レイヤー（"COMB d=..."）にも対応。`_comb_bright_rects_u` ヘルパを追加。`outputs/_demo_metric_overlays.py` の matplotlib fallback も 5 幅縞描画に更新。テスト 381→383 件（pitch テスト 1 件を削除、stripe 関連 3 件を追加） | 本コミット |
