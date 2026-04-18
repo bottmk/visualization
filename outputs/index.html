@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>bsdf-sim outputs index</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif; max-width: 1200px; margin: 0 auto; padding: 1.5rem; line-height: 1.6; }
+  h1 { border-bottom: 2px solid #0969da; padding-bottom: 0.3em; }
+  h2 { margin-top: 2em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.2em; }
+  .notice { background: #fff8c5; border: 1px solid #d4a72c; padding: 0.6rem 1rem; border-radius: 6px; margin: 1rem 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; margin-top: 1rem; }
+  .card { border: 1px solid #d0d7de; border-radius: 8px; padding: 0.8rem; background: #f6f8fa; }
+  .card h3 { margin: 0 0 0.4rem 0; font-size: 1rem; }
+  .card p { margin: 0.3rem 0; font-size: 0.88rem; color: #57606a; }
+  .card img { width: 100%; height: auto; display: block; border: 1px solid #d0d7de; border-radius: 4px; background: #fff; }
+  .card a.filename { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.82rem; color: #0969da; text-decoration: none; }
+  .card a.filename:hover { text-decoration: underline; }
+  .meta { display: flex; gap: 0.6rem; flex-wrap: wrap; font-size: 0.82rem; margin-top: 0.4rem; }
+  .meta a { color: #0969da; text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .btn-primary { display: inline-block; background: #0969da; color: #fff; padding: 0.5rem 1rem; border-radius: 6px; text-decoration: none; font-weight: 600; }
+  .btn-primary:hover { background: #0860c7; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1rem; font-size: 0.9rem; }
+  th, td { border: 1px solid #d0d7de; padding: 0.4rem 0.7rem; text-align: left; }
+  th { background: #f6f8fa; }
+  code { background: #f6f8fa; padding: 0.1em 0.3em; border-radius: 3px; font-size: 0.9em; }
+  @media (prefers-color-scheme: dark) {
+    body { background: #0d1117; color: #c9d1d9; }
+    h1, h2 { border-color: #30363d; }
+    .card { background: #161b22; border-color: #30363d; }
+    .card p { color: #8b949e; }
+    th { background: #161b22; }
+    th, td { border-color: #30363d; }
+    code { background: #161b22; }
+    .notice { background: #2d2a14; border-color: #66541a; color: #e3b341; }
+  }
+</style>
+</head>
+<body>
+
+<h1>bsdf-sim — outputs ビューア</h1>
+
+<p><code>outputs/</code> に生成されたデモ画像・インタラクティブ HTML を GitHub のブラウザから閲覧するためのインデックスページ。</p>
+
+<div class="notice">
+  <strong>このページの見方:</strong>
+  GitHub は <code>.html</code> をソース表示するため、インタラクティブ HTML は
+  <a href="https://htmlpreview.github.io/" target="_blank" rel="noopener">htmlpreview.github.io</a>
+  経由でレンダリングする。PNG は <code>raw.githubusercontent.com</code> から直接埋め込み（クリックで原寸表示）。
+</div>
+
+<p>
+  <a class="btn-primary" href="https://htmlpreview.github.io/?https://github.com/bottmk/visualization/blob/main/outputs/index.html" target="_blank" rel="noopener">
+    このページを htmlpreview で開く
+  </a>
+  &nbsp;
+  <a href="https://github.com/bottmk/visualization/tree/main/outputs" target="_blank" rel="noopener">
+    GitHub で <code>outputs/</code> を開く
+  </a>
+</p>
+
+<h2>インタラクティブ HTML</h2>
+
+<div class="grid">
+
+  <div class="card">
+    <h3>demo_metric_overlays.html</h3>
+    <p>Bokeh ベースの 2D BSDF ヒートマップに光学指標（Haze / Gloss / DOI-NSER / DOI-COMB / DOI-ASTM）を重ね描きしたインタラクティブプロット。凡例クリックでレイヤー ON/OFF 切替可能。</p>
+    <div class="meta">
+      <a href="https://htmlpreview.github.io/?https://github.com/bottmk/visualization/blob/main/outputs/demo_metric_overlays.html" target="_blank" rel="noopener">▶ htmlpreview で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/demo_metric_overlays.html" target="_blank" rel="noopener">source</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_metric_overlays.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+</div>
+
+<h2>PNG 画像</h2>
+
+<div class="grid">
+
+  <div class="card">
+    <h3>demo_metric_overlays.png</h3>
+    <p>Phase 1 光学指標 overlay の静止画版（フル）。Haze / Gloss / DOI-NSER / DOI-COMB / DOI-ASTM の幾何を UV 半球面に投影。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/demo_metric_overlays.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/demo_metric_overlays.png" alt="demo_metric_overlays" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/demo_metric_overlays.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_metric_overlays.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>demo_metric_overlays_zoom.png</h3>
+    <p>上記の Specular 近傍ズーム版。DOI-COMB の 5 くし幅（0.125–2.0 mm）のスリット群と ASTM 3 円が見やすい。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/demo_metric_overlays_zoom.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/demo_metric_overlays_zoom.png" alt="demo_metric_overlays_zoom" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/demo_metric_overlays_zoom.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_metric_overlays.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>demo_metric_overlays_1d.png</h3>
+    <p>1D BSDF 角度プロファイル（θ_s vs BSDF）に指標を縦帯・縦線として重ねたデモ。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/demo_metric_overlays_1d.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/demo_metric_overlays_1d.png" alt="demo_metric_overlays_1d" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/demo_metric_overlays_1d.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_metric_overlays.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>dashboard_demo_overlay.png</h3>
+    <p>dashboard の 1D 重ね描き（FFT / PSD / MultiLayer / measured の 4 系列重畳）を matplotlib で再現した静止画。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/dashboard_demo_overlay.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/dashboard_demo_overlay.png" alt="dashboard_demo_overlay" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/dashboard_demo_overlay.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_overlay.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>fft_fresnel_vs_psd.png</h3>
+    <p>FFT（Fresnel 補正なし）/ FFT（<code>apply_fresnel=True</code> でポスト乗算）/ PSD（Rayleigh-Rice）の 3 手法比較。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/fft_fresnel_vs_psd.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/fft_fresnel_vs_psd.png" alt="fft_fresnel_vs_psd" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/fft_fresnel_vs_psd.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_fft_fresnel_vs_psd.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>fft_modes_comparison.png</h3>
+    <p>FFT 3 モード（<code>tilt</code> / <code>output_shift</code> / <code>zero</code>）の side-by-side 比較。θ_i 大での挙動差がわかる。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/fft_modes_comparison.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/fft_modes_comparison.png" alt="fft_modes_comparison" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/fft_modes_comparison.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_fft_modes.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>secondary_axis_units.png</h3>
+    <p>同一 BSDF カーブを 5 種の副軸ユニット（<code>theta_s</code> / <code>lambda_scale</code> / <code>u</code> / <code>f</code> / <code>k_x</code>）で表示した比較。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/secondary_axis_units.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/secondary_axis_units.png" alt="secondary_axis_units" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/secondary_axis_units.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_secondary_axis.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>theta_i_relative_comparison.png</h3>
+    <p>複数 θ_i の BSDF 比較: 絶対座標 vs 相対座標 vs Fresnel 補正後座標の 3 パネル。</p>
+    <a href="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/theta_i_relative_comparison.png" target="_blank" rel="noopener">
+      <img src="https://raw.githubusercontent.com/bottmk/visualization/main/outputs/theta_i_relative_comparison.png" alt="theta_i_relative_comparison" loading="lazy">
+    </a>
+    <div class="meta">
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/theta_i_relative_comparison.png" target="_blank" rel="noopener">GitHub で開く</a>
+      <a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_theta_i_relative.py" target="_blank" rel="noopener">生成スクリプト</a>
+    </div>
+  </div>
+
+</div>
+
+<h2>生成スクリプト一覧</h2>
+
+<table>
+  <thead>
+    <tr><th>スクリプト</th><th>生成物</th><th>用途</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_metric_overlays.py" target="_blank" rel="noopener"><code>_demo_metric_overlays.py</code></a></td>
+      <td>demo_metric_overlays.html / .png / _zoom.png / _1d.png</td>
+      <td>Phase 1 光学指標オーバーレイ（Haze/Gloss/DOI 3 方式）のデモ</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_overlay.py" target="_blank" rel="noopener"><code>_demo_overlay.py</code></a></td>
+      <td>dashboard_demo_overlay.png</td>
+      <td>dashboard の 1D 重ね描きを matplotlib で再現</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_fft_fresnel_vs_psd.py" target="_blank" rel="noopener"><code>_demo_fft_fresnel_vs_psd.py</code></a></td>
+      <td>fft_fresnel_vs_psd.png</td>
+      <td>FFT（無補正/Fresnel 後掛け）vs PSD 比較</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_fft_modes.py" target="_blank" rel="noopener"><code>_demo_fft_modes.py</code></a></td>
+      <td>fft_modes_comparison.png</td>
+      <td>FFT 3 モード（tilt/output_shift/zero）の side-by-side 比較</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_secondary_axis.py" target="_blank" rel="noopener"><code>_demo_secondary_axis.py</code></a></td>
+      <td>secondary_axis_units.png</td>
+      <td>副軸ユニット 5 種の並置比較</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/bottmk/visualization/blob/main/outputs/_demo_theta_i_relative.py" target="_blank" rel="noopener"><code>_demo_theta_i_relative.py</code></a></td>
+      <td>theta_i_relative_comparison.png</td>
+      <td>複数 θ_i BSDF の絶対/相対/補正座標比較</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>閲覧方法</h2>
+
+<p>このリポジトリ（<code>bottmk/visualization</code>）はプライベート / パブリックの設定によって htmlpreview の動作が異なる:</p>
+
+<ul>
+  <li><strong>パブリックリポジトリ</strong>: 上記の htmlpreview リンクでそのまま閲覧可能</li>
+  <li><strong>プライベートリポジトリ</strong>: htmlpreview は blob URL にアクセスできないため、ローカルで <code>python -m http.server</code> を <code>outputs/</code> 内で起動して <code>http://localhost:8000/index.html</code> を開く</li>
+</ul>
+
+<p style="margin-top: 2em; color: #57606a; font-size: 0.85rem; border-top: 1px solid #d0d7de; padding-top: 1em;">
+  Generated for <code>bottmk/visualization</code> · outputs index
+</p>
+
+</body>
+</html>
