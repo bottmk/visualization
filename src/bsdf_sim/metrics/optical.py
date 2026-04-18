@@ -37,6 +37,73 @@ def _specular_u_center(theta_i_deg: float, mode: str, n1: float = 1.0, n2: float
     return float(np.sin(theta_i_rad))
 
 
+# ── 積分ヘルパー（共通） ────────────────────────────────────────────────────
+#
+# Haze/Gloss/DOI-NSER/DOI-ASTM は全て「BSDF·cosθ の (u, v) 空間積分」という同じ
+# 骨格を持ち、積分領域（円 or 長方形、内側 or 外側）のみが異なる。以下のヘルパーで
+# 共通化する（詳細は docs/metric_bsdf_relation.md 参照）。
+
+
+def _bsdf_grid_geometry(
+    u_grid: np.ndarray, v_grid: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """(u, v) グリッドから半球マスク・cos θ・du・dv を返す共通前処理。
+
+    Returns:
+        (valid, cos_s, du, dv)
+            valid: uv_r² ≤ 1 の半球内マスク（2D bool）
+            cos_s: cos(θ_s) = √(1 - uv_r²)（2D、半球外は 0 クリップ）
+            du, dv: u/v 方向の格子間隔（等間隔グリッド前提）
+    """
+    uv_r2 = u_grid**2 + v_grid**2
+    valid = uv_r2 <= 1.0
+    cos_s = np.sqrt(np.maximum(1.0 - uv_r2, 0.0))
+    du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
+    dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
+    return valid, cos_s, du, dv
+
+
+def _flux_hemisphere(u_grid: np.ndarray, v_grid: np.ndarray, bsdf: np.ndarray) -> float:
+    """半球全域の BSDF·cosθ·dΩ 積分（全透過光フラックス）。"""
+    valid, cos_s, du, dv = _bsdf_grid_geometry(u_grid, v_grid)
+    return float(np.sum(bsdf[valid] * cos_s[valid]) * du * dv)
+
+
+def _flux_in_circle(
+    u_grid: np.ndarray, v_grid: np.ndarray, bsdf: np.ndarray,
+    u_center: float, v_center: float, half_angle_deg: float,
+    inverted: bool = False,
+) -> float:
+    """円絞りの内側（または外側）の BSDF·cosθ·dΩ 積分。
+
+    Args:
+        u_center, v_center: 絞り中心の方向余弦
+        half_angle_deg: 絞り半角 [deg]
+        inverted: True で絞りの「外側」を積分（Haze の広角散乱で使用）
+    """
+    valid, cos_s, du, dv = _bsdf_grid_geometry(u_grid, v_grid)
+    offset_r2 = (u_grid - u_center) ** 2 + (v_grid - v_center) ** 2
+    sin_half2 = np.sin(np.deg2rad(half_angle_deg)) ** 2
+    if inverted:
+        mask = valid & (offset_r2 >= sin_half2)
+    else:
+        mask = valid & (offset_r2 <= sin_half2)
+    return float(np.sum(bsdf[mask] * cos_s[mask]) * du * dv)
+
+
+def _flux_in_rect(
+    u_grid: np.ndarray, v_grid: np.ndarray, bsdf: np.ndarray,
+    u_center: float, v_center: float,
+    du_half: float, dv_half: float,
+) -> float:
+    """長方形絞り内の BSDF·cosθ·dΩ 積分（u, v 空間の半幅で指定）。"""
+    valid, cos_s, du, dv = _bsdf_grid_geometry(u_grid, v_grid)
+    in_u = np.abs(u_grid - u_center) <= du_half
+    in_v = np.abs(v_grid - v_center) <= dv_half
+    mask = valid & in_u & in_v
+    return float(np.sum(bsdf[mask] * cos_s[mask]) * du * dv)
+
+
 # ── Log-RMSE ─────────────────────────────────────────────────────────────────
 
 def compute_log_rmse(
@@ -96,30 +163,13 @@ def compute_haze(
     Returns:
         ヘイズ値（0〜1）
     """
-    uv_r2 = u_grid**2 + v_grid**2
-    # 直進光中心からの角距離（小角近似で u,v 空間距離を角度とみなす）
-    du_c = u_grid - u_center
-    dv_c = v_grid - v_center
-    offset_r2 = du_c**2 + dv_c**2
-    sin_half = np.sin(np.deg2rad(half_angle_deg))
-    threshold_r2 = sin_half**2
-
-    # 微小立体角 dΩ = cos(θ_s) * du * dv（UV空間での積分）
-    du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
-    dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
-    cos_s = np.sqrt(np.maximum(1.0 - uv_r2, 0.0))
-    valid = uv_r2 <= 1.0
-
-    # 全透過光量（半球積分）
-    total = np.sum(bsdf[valid] * cos_s[valid]) * du * dv
-
-    # 広角散乱光量（直進光中心から境界角以上）
-    wide = offset_r2 >= threshold_r2
-    haze_power = np.sum(bsdf[valid & wide] * cos_s[valid & wide]) * du * dv
-
+    total = _flux_hemisphere(u_grid, v_grid, bsdf)
     if total < 1e-30:
         return 0.0
-    return float(haze_power / total)
+    wide = _flux_in_circle(
+        u_grid, v_grid, bsdf, u_center, v_center, half_angle_deg, inverted=True,
+    )
+    return float(wide / total)
 
 
 # ── グロス ───────────────────────────────────────────────────────────────────
@@ -214,23 +264,8 @@ def compute_gloss(
     du_half = cos_sp * np.deg2rad(ap["in_plane_deg"] / 2.0)
     dv_half = np.deg2rad(ap["cross_plane_deg"] / 2.0)
 
-    # 長方形マスク
-    in_u = np.abs(u_grid - u_center) <= du_half
-    in_v = np.abs(v_grid - v_center) <= dv_half
-    mask = in_u & in_v
-
-    uv_r2 = u_grid**2 + v_grid**2
-    valid = uv_r2 <= 1.0
-    cos_s = np.sqrt(np.maximum(1.0 - uv_r2, 0.0))
-    du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
-    dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
-
-    selected = valid & mask
-    if not np.any(selected):
-        return 0.0
-
     # 受光絞り内の積分フラックス（BSDF · cosθ · dΩ）
-    flux = float(np.sum(bsdf[selected] * cos_s[selected]) * du * dv)
+    flux = _flux_in_rect(u_grid, v_grid, bsdf, u_center, v_center, du_half, dv_half)
 
     if black_glass_normalization:
         r_bg = _fresnel_reflectance_unpol(gloss_angle_deg, n1=1.0, n2=black_glass_n)
@@ -283,26 +318,12 @@ def compute_doi_nser(
     Returns:
         DOI 値 (0〜1)
     """
-    uv_r2 = u_grid**2 + v_grid**2
-    du_c = u_grid - u_center
-    dv_c = v_grid - v_center
-    offset_r2 = du_c**2 + dv_c**2
-
-    cos_s = np.sqrt(np.maximum(1.0 - uv_r2, 0.0))
-    valid = uv_r2 <= 1.0
-
-    du = abs(u_grid[1, 0] - u_grid[0, 0]) if u_grid.shape[0] > 1 else 1.0
-    dv = abs(v_grid[0, 1] - v_grid[0, 0]) if v_grid.shape[1] > 1 else 1.0
-
-    sin_direct = np.sin(np.deg2rad(direct_half_angle_deg))
-    sin_halo = np.sin(np.deg2rad(halo_half_angle_deg))
-
-    direct_mask = valid & (offset_r2 <= sin_direct**2)
-    halo_mask = valid & (offset_r2 <= sin_halo**2)
-
-    direct_power = np.sum(bsdf[direct_mask] * cos_s[direct_mask]) * du * dv
-    total_near = np.sum(bsdf[halo_mask] * cos_s[halo_mask]) * du * dv
-
+    direct_power = _flux_in_circle(
+        u_grid, v_grid, bsdf, u_center, v_center, direct_half_angle_deg,
+    )
+    total_near = _flux_in_circle(
+        u_grid, v_grid, bsdf, u_center, v_center, halo_half_angle_deg,
+    )
     if total_near < 1e-30:
         return 1.0
     return float(direct_power / total_near)
@@ -423,32 +444,21 @@ def compute_doi_astm(
         パーセント表示が必要な場合は呼び出し側で ×100 する
         (ASTM E430 規格値は従来 0〜100 [%] 表記)。
     """
-    uv_r2 = u_grid**2 + v_grid**2
-    cos_s = np.sqrt(np.maximum(1.0 - uv_r2, 0.0))
-
-    u_axis = u_grid[:, 0]
-    v_axis = v_grid[0, :]
-    du = abs(u_axis[1] - u_axis[0]) if u_axis.size > 1 else 1.0
-    dv = abs(v_axis[1] - v_axis[0]) if v_axis.size > 1 else 1.0
-
-    sin_ap2 = np.sin(np.deg2rad(aperture_half_deg)) ** 2
     sin_off = np.sin(np.deg2rad(offset_deg))
 
-    # R(specular): 中心 (u_center, v_center) 絞り内の積分
-    dr0_2 = (u_grid - u_center) ** 2 + (v_grid - v_center) ** 2
-    mask0 = dr0_2 <= sin_ap2
-    r0 = float(np.sum(bsdf[mask0] * cos_s[mask0]) * du * dv)
+    # R(specular): 中心 (u_center, v_center) の絞り内の積分
+    r0 = _flux_in_circle(
+        u_grid, v_grid, bsdf, u_center, v_center, aperture_half_deg,
+    )
 
-    # R(offset): 中心から ±u 方向にオフセットした点での受光の平均
-    r_off_values: list[float] = []
-    for sign in (+1.0, -1.0):
-        u0 = u_center + sign * sin_off
-        dr2 = (u_grid - u0) ** 2 + (v_grid - v_center) ** 2
-        mask = dr2 <= sin_ap2
-        if np.any(mask):
-            r_off_values.append(float(np.sum(bsdf[mask] * cos_s[mask]) * du * dv))
-    if not r_off_values:
-        return 0.0
+    # R(offset): 中心から ±u 方向にオフセットした点での積分の平均
+    r_off_values = [
+        _flux_in_circle(
+            u_grid, v_grid, bsdf,
+            u_center + sign * sin_off, v_center, aperture_half_deg,
+        )
+        for sign in (+1.0, -1.0)
+    ]
     r_off = float(np.mean(r_off_values))
 
     if r0 < 1e-30:
