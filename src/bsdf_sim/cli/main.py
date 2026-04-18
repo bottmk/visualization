@@ -459,14 +459,8 @@ def simulate(
             ml_logger = RawDataLogger(tracking_uri=mlflow_cfg.get("tracking_uri", "mlruns"))
             surface_cfg = cfg.surface
             model_name = surface_cfg.get("model", "")
-            params: dict = {}
-            if model_name == "RandomRoughSurface":
-                rr = surface_cfg.get("random_rough", {})
-                params = {
-                    "rq_um": rr.get("rq_um"),
-                    "lc_um": rr.get("lc_um"),
-                    "fractal_dim": rr.get("fractal_dim"),
-                }
+            from ..optimization.mlflow_logger import build_run_params
+            params = build_run_params(cfg)
             all_metrics = {**surface_metrics, **all_optical_metrics}
 
             # PNG / HTML を一時ディレクトリで生成してから MLflow にアップロード
@@ -759,8 +753,12 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
 
         # MLflow 記録
         df = pd.concat(all_dfs, ignore_index=True)
+        from ..optimization.mlflow_logger import build_run_params
+        params = build_run_params(
+            cfg, extra={"rq_um": rq, "lc_um": lc, "fractal_dim": fd},
+        )
         ml_logger.log_trial(
-            params={"rq_um": rq, "lc_um": lc, "fractal_dim": fd},
+            params=params,
             metrics=all_metrics,
             df=df,
             run_name=f"trial_{trial.number}",

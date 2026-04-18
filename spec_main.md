@@ -603,6 +603,27 @@ optuna:
 2. **02_Analysis_Reports（比較レポート）** ✅ 実装済み: 1 Run = 1 解析タスク。複数の形状データを引き出して重ね合わせたインタラクティブなBSDF比較グラフ（HTML）を保存する。`AnalysisLogger` クラスで実装。`bsdf report --log-to-mlflow` 時に source_run_ids と comparison_report.html を記録。
 3. **03_GenAI_Insights（AI考察）** ⚠️ **未実装・構想段階**: LLMを用いて、測定値やメトリクスに基づく設計改善の考察レポートを自動生成・記録する。現状は `EXPERIMENT_GENAI = "03_GenAI_Insights"` の定数のみ `optimization/mlflow_logger.py` に定義されており、`GenAILogger` クラスおよびロジックは未実装。Section 11 の TODO 参照。
 
+**01_BSDF_Raw_Data の params 仕様（`build_run_params`）:**
+
+run ごとの入力条件は `optimization/mlflow_logger.py::build_run_params(cfg)` が BSDFConfig から構築し、`simulate --log-to-mlflow` と `optimize` 両方で使用される。形状（design / measured）と BSDF 測定は独立の 3 カテゴリとして扱う。
+
+| key | 値の例 | 登場条件 |
+|---|---|---|
+| `surface_design` | `"RandomRough"` / `"SphericalArray"` | 形状デザインを使う run |
+| `surface_measured` | `"Measured"` / `"Vk6"` | 形状測定を使う run（`MeasuredSurface` サブクラス） |
+| `bsdf_measured` | `"LightTools"` | `measured_bsdf.path` 指定時（`BaseBsdfFileReader.can_read()` で自動検出） |
+| `shape_data_path` | `"sample_inputs/vk6.csv"` | 形状測定使用時 |
+| `bsdf_data_path` | `"sample_inputs/BRDF.bsdf"` | BSDF 測定使用時 |
+| 形状パラメータ | RandomRough: `rq_um` / `lc_um` / `fractal_dim`、SphericalArray: `radius_um` / `pitch_um` / `base_height_um` / `placement` / `overlap_mode`、Measured 系: `padding` / `pixel_size_um` / `grid_size` / `source_pixel_size_um` / `height_unit` / `leveling` | モデルに応じて該当する key のみ |
+| sim 条件（実測と共通語彙） | `wavelength_um` / `theta_i_deg` / `phi_i_deg` / `mode` / `polarization` / `n1` / `n2` | 常に（多条件 run は JSON list、単条件はスカラ） |
+| sim 専用条件 | `fft_mode` / `apply_fresnel` | 常に |
+
+**短縮名変換ルール:** `_short_name()` は (1) 末尾 `Surface` / `BsdfReader` を除去、(2) 残り先頭の `Device` プレフィックスを除去。例: `DeviceVk6Surface` → `"Vk6"`、`LightToolsBsdfReader` → `"LightTools"`。
+
+**多条件 run の value 形式:** リストは JSON 文字列化（`wavelength_um = "[0.465, 0.525, 0.630]"`）。要素が 1 個なら自動的にスカラ文字列に縮退する。実測 BSDF 比較では sim 条件と同じ key 名で記録されるため、MLflow UI の Compare 画面で縦並び比較できる。
+
+**タグ（tags）:** 現状は独自タグを設定しない（`mlflow.runName` 等のシステムタグのみ）。事後ラベリングが必要な場合は `MlflowClient.set_tag` または MLflow UI から追加できる。
+
 **Parquet スキーマ（01_BSDF_Raw_Data）:**
 
 1行 = 1測定/計算点 × 1手法。`method` カラムで手法を区別することで、新しい計算手法を追加してもスキーマ変更が不要。
@@ -1232,6 +1253,7 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 
 | 日付 | 変更内容 | 対応コミット |
 |---|---|---|
+| 2026-04-18 | **MLflow params に形状モデル識別・形状パラメータ・sim 条件を追加**（機能拡張、後方互換）: 従来 params は `rq_um`/`lc_um`/`fractal_dim`（RandomRough のみ）に限定され、他モデルでは空だった。`optimization/mlflow_logger.py::build_run_params(cfg)` を新設し、3 カテゴリ独立で登録: (A) 形状識別: `surface_design`（RandomRough/SphericalArray）/ `surface_measured`（Measured/Vk6 等、`MeasuredSurface` サブクラス）/ `bsdf_measured`（LightTools 等、`_detect_bsdf_reader_name` で自動検出）。短縮名は `_short_name()` が末尾 `Surface`/`BsdfReader` と先頭 `Device` を除去。(B) ファイルパス: `shape_data_path` / `bsdf_data_path` を該当時のみ params に登録（tags は使わず）。(C) 形状パラメータ: モデル別に必要な key のみ（RandomRough: rq_um/lc_um/fractal_dim、SphericalArray: radius_um/pitch_um/base_height_um/placement/overlap_mode、Measured 系: padding/source_pixel_size_um/height_unit/leveling/grid_size/pixel_size_um）。(D) sim 条件: `wavelength_um`/`theta_i_deg`/`phi_i_deg`/`mode`/`polarization`/`n1`/`n2` を実測 BSDF 条件と共通語彙で登録（多条件は JSON 文字列、単条件はスカラ）。(E) sim 専用: `fft_mode`/`apply_fresnel`。`cli/main.py` の simulate と optimize 両方で `build_run_params(cfg)` を使用（optimize は `extra={"rq_um": rq, ...}` で trial 値を注入）。`spec_main.md` Section 6.2 に params 仕様表を追加。テスト 461→485 件（+24、`TestShortName` 6 件・`TestStringify` 4 件・`TestBuildRunParams*` 14 件） | 本コミット |
 | 2026-04-18 | **Sparkle L3/L4/L5 パイプライン統合 + L1 メトリクスキー改名（破壊的）**: (A) 命名整理: `compute_sparkle_l3prime` → `compute_sparkle_l3`、docs/コード全体で `L3'` → `L3` に統一（旧 L3 定義「全サブピクセル同色発光」は L3NG として docs 脚注に退避）。(B) 破壊的変更: L1 のメトリクスキーを `sparkle_<method>_<nm>_<deg>_<mode>` → `sparkle_l1_<method>_<nm>_<deg>_<mode>` に改名（案 B 採用、level を明示）。既存 MLflow runs / config.yaml objectives / CLI 例示箇所を一括更新。(C) `compute_all_optical_metrics` に `height_map: HeightMap \| None = None` 引数を追加、`config["sparkle"]["level"]` で L1/L3/L4/L5 を dispatch（`color` で L3/L5 の点灯色指定）。`cli/main.py` の simulate/optimize 両経路で `height_map=hm` を渡すよう修正。(D) `config.yaml` / `sample_inputs/config_device_vk6.yaml` に `sparkle.level`（既定 'L1'）と `sparkle.color`（既定 'G'）を追加。(E) `TestSparkleLevelDispatch` クラスで 7 件の統合テスト追加（level 省略既定・L3 height_map 要求・L3/L4/L5 キー名検証・不正 level エラー・大文字小文字非依存）。テスト 434→447 件（+13） | 本コミット |
 | 2026-04-18 | **2D BSDF カラーマップの独立 log/linear 切替 + 範囲固定を追加**（機能拡張、後方互換）: 従来は 1D Y 軸スケール（`scale`）に連動して 2D カラーマップの log/linear が決まっていたが、独立制御が可能に。(A) `plot_bsdf_2d_heatmap` に `clim: tuple[float, float] \| None = None` 引数を追加（生 BSDF 値 [sr⁻¹] で指定、`log_scale=True` 時は内部で `log10(max(v, BSDF_LOG_FLOOR_DEFAULT))` 変換）。(B) `_BaseBSDFDashboard._make_range_controls` 汎用ヘルパを新設（Checkbox + 最小/最大 FloatInput、`_make_ylim_controls` と `_make_axis_controls` 内のカラー範囲 UI の両方で再利用）。(C) `_make_axis_controls` の戻り値に `cscale`（2D カラーバー log/linear RadioButtonGroup、既定 'log'）+ `fix_clim`/`cmin`/`cmax` を追加。3 dashboard（RandomRough/Spherical/Measured）の `update_plot` に依存追加、2D は `log_scale=(cscale=='log'), clim=(cmin,cmax) if fix_clim else None` を使用。(D) `_make_2d_heatmap_with_overlay` / `_build_condition_panel` / `plot_bsdf_report` に `cscale`/`clim` を伝播（`cscale=None` の場合は従来通り 1D `scale` に従うので後方互換）。テスト 441→454 件（+13、`TestMakeAxisControls` 5 件・`TestPlotBsdf2DHeatmapClim` 4 件・`plot_bsdf_report` 伝播 3 件 + 既存整理） | 本コミット |
 | 2026-04-18 | **spec_main.md に「FFT 法の数値限界」セクションを追加**（ドキュメントのみ、挙動変更なし）: Section 3.2 末尾に `#### FFT 法の数値限界` サブセクションを新設。`fft_bsdf.py` の実装と整合させて 6 項目を整理 — (1) 空間サンプリング限界（モード別 dx 条件の表: `tilt` / `output_shift` / `zero`）、(2) 角度分解能 $\Delta u = \lambda/(N\,dx)$ と grazing 発散、(3) `tilt` モード特有の DFT スペクトル漏れ（窓関数未実装と記載）、(4) スカラー近似の限界（偏光・広角 30° 警告、`apply_fresnel` ヒューリスティック）、(5) Kirchhoff 近似の前提（勾配・曲率・多重散乱・phase wrapping）、(6) 計算コスト・メモリ（$N=4096$ で ~268 MB・~20〜30 秒） | 本コミット |

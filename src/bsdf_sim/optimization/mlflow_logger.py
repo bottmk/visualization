@@ -8,12 +8,16 @@ spec_main.md Section 6.2:
 
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import mlflow
 import pandas as pd
+
+if TYPE_CHECKING:
+    from ..io.config_loader import BSDFConfig
 
 
 EXPERIMENT_RAW_DATA    = "01_BSDF_Raw_Data"
@@ -27,6 +31,181 @@ def _get_or_create_experiment(name: str) -> str:
     if exp is None:
         return mlflow.create_experiment(name)
     return exp.experiment_id
+
+
+# ── MLflow run params 構築ヘルパ ─────────────────────────────────────────────
+
+
+def _short_name(class_name: str) -> str:
+    """クラス名から MLflow params 表示用の短縮名を生成する。
+
+    変換規則（共通化のため記号的に適用）:
+        - 末尾 'BsdfReader' または 'Surface' を除去
+        - 残り先頭の 'Device' プレフィックスも除去
+
+    例: RandomRoughSurface → 'RandomRough' / SphericalArraySurface →
+        'SphericalArray' / DeviceVk6Surface → 'Vk6' /
+        LightToolsBsdfReader → 'LightTools' / MeasuredSurface → 'Measured'
+    """
+    name = class_name
+    for suffix in ("BsdfReader", "Surface"):
+        if name.endswith(suffix):
+            name = name[: -len(suffix)]
+            break
+    if name.startswith("Device"):
+        name = name[len("Device"):]
+    return name
+
+
+def _stringify(value: Any) -> str:
+    """MLflow params に入れる値を文字列化する（リストは JSON 化）。"""
+    if isinstance(value, (list, tuple)):
+        # 単一要素ならスカラ表示、複数なら JSON 文字列
+        if len(value) == 1:
+            return str(value[0])
+        return json.dumps(list(value))
+    return str(value)
+
+
+def _detect_bsdf_reader_name(path: str | Path) -> str | None:
+    """BSDF ファイルに対応するリーダークラス名を自動判定する。
+
+    読み込み時と同じ can_read() 順に検査する。リーダーが見つからなければ
+    None を返す（呼び出し側で "unknown" 等にフォールバック）。
+    """
+    try:
+        from ..io.bsdf_reader import _READER_REGISTRY, load_bsdf_readers
+    except ImportError:
+        return None
+    if not _READER_REGISTRY:
+        # プラグイン未ロードの場合はロードを試行（例: テストから直接呼ぶ場合）
+        try:
+            load_bsdf_readers()
+        except Exception:
+            return None
+    p = Path(path)
+    if not p.exists():
+        return None
+    for name, reader_cls in _READER_REGISTRY.items():
+        try:
+            if reader_cls.can_read(p):
+                return name
+        except Exception:
+            continue
+    return None
+
+
+def build_run_params(
+    cfg: "BSDFConfig",
+    *,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    """BSDFConfig から MLflow params 辞書を構築する。
+
+    登録される key（spec_main.md Section 6.2 参照）:
+        形状識別（排他的に片方のみ）:
+            - surface_design: 'RandomRough' / 'SphericalArray' 等
+            - surface_measured: 'Vk6' / 'Measured' 等
+        BSDF 測定識別（measured_bsdf.path 指定時のみ）:
+            - bsdf_measured: 'LightTools' 等
+        ファイルパス（該当時のみ）:
+            - shape_data_path: surface.measured.path
+            - bsdf_data_path: measured_bsdf.path
+        形状パラメータ（モデル別に該当する key のみ）:
+            - RandomRough: rq_um / lc_um / fractal_dim
+            - SphericalArray: radius_um / pitch_um / base_height_um /
+              placement / overlap_mode
+            - Measured 系: padding / pixel_size_um / grid_size /
+              source_pixel_size_um / height_unit / leveling
+        sim 条件（実測 BSDF 条件と共通語彙、多条件は JSON list）:
+            - wavelength_um / theta_i_deg / phi_i_deg / mode /
+              polarization / n1 / n2
+        sim 専用条件:
+            - fft_mode / apply_fresnel
+
+    Args:
+        cfg: BSDFConfig インスタンス
+        extra: 追加の params 辞書（optimize 等で trial パラメータを
+            追加したい場合に使用）
+
+    Returns:
+        MLflow の `log_params` にそのまま渡せる dict[str, str]
+    """
+    from ..models import get_model_class
+    from ..models.measured import MeasuredSurface
+
+    params: dict[str, str] = {}
+
+    # ── 形状モデル識別 ─────────────────────────────────────────────
+    model_name = cfg.surface.get("model", "RandomRoughSurface")
+    try:
+        model_class = get_model_class(model_name)
+        is_measured = issubclass(model_class, MeasuredSurface)
+    except (ValueError, KeyError):
+        # 未知モデル名はフォールバック: surface_design として記録
+        is_measured = False
+
+    short = _short_name(model_name)
+    if is_measured:
+        params["surface_measured"] = short
+        measured_cfg = cfg.surface.get("measured", {})
+        if measured_cfg.get("path"):
+            params["shape_data_path"] = str(measured_cfg["path"])
+        for key in ("padding", "source_pixel_size_um", "height_unit", "leveling"):
+            if key in measured_cfg:
+                params[key] = _stringify(measured_cfg[key])
+        # surface トップレベルの共通設定
+        for key in ("grid_size", "pixel_size_um"):
+            if key in cfg.surface:
+                params[key] = _stringify(cfg.surface[key])
+    else:
+        params["surface_design"] = short
+        if model_name == "RandomRoughSurface":
+            rr = cfg.surface.get("random_rough", {})
+            for key in ("rq_um", "lc_um", "fractal_dim"):
+                if key in rr:
+                    params[key] = _stringify(rr[key])
+        elif model_name == "SphericalArraySurface":
+            sa = cfg.surface.get("spherical_array", {})
+            for key in (
+                "radius_um", "pitch_um", "base_height_um",
+                "placement", "overlap_mode",
+            ):
+                if key in sa:
+                    params[key] = _stringify(sa[key])
+        for key in ("grid_size", "pixel_size_um"):
+            if key in cfg.surface:
+                params[key] = _stringify(cfg.surface[key])
+
+    # ── BSDF 測定識別 ──────────────────────────────────────────────
+    bsdf_path = cfg.measured_bsdf_path
+    if bsdf_path:
+        params["bsdf_data_path"] = bsdf_path
+        reader_name = _detect_bsdf_reader_name(bsdf_path)
+        if reader_name:
+            params["bsdf_measured"] = _short_name(reader_name)
+        else:
+            params["bsdf_measured"] = "unknown"
+
+    # ── sim 条件（実測 BSDF 条件と共通語彙）─────────────────────
+    params["wavelength_um"] = _stringify(cfg.wavelengths_um)
+    params["theta_i_deg"] = _stringify(cfg.theta_i_list_deg)
+    modes = cfg.modes
+    if modes:
+        params["mode"] = _stringify(modes)
+    params["phi_i_deg"] = _stringify(cfg.phi_i_deg)
+    params["polarization"] = cfg.polarization
+    params["n1"] = _stringify(cfg.n1)
+    params["n2"] = _stringify(cfg.n2)
+
+    # ── sim 専用条件 ───────────────────────────────────────────────
+    params["fft_mode"] = cfg.fft_mode
+    params["apply_fresnel"] = _stringify(cfg.fft_apply_fresnel)
+
+    if extra:
+        for k, v in extra.items():
+            params[k] = _stringify(v)
+    return params
 
 
 class RawDataLogger:
