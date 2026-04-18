@@ -194,6 +194,7 @@ def plot_bsdf_2d_heatmap(
     bsdf: np.ndarray,
     title: str = "BSDF 2D ヒートマップ",
     log_scale: bool = True,
+    clim: tuple[float, float] | None = None,
     metrics_config: dict[str, Any] | None = None,
     metric_overlay_config: dict[str, Any] | None = None,
     theta_i_deg: float = 0.0,
@@ -209,6 +210,8 @@ def plot_bsdf_2d_heatmap(
         bsdf: BSDF 値 [sr⁻¹]（2D）
         title: プロットタイトル
         log_scale: True の場合 log10 スケールで表示
+        clim: カラーバー範囲 (vmin, vmax)。**生 BSDF 値 [sr⁻¹]** で指定する。
+            `log_scale=True` のときは内部で log10 変換される。None で自動。
         metrics_config: config.metrics セクション辞書。与えられ、かつ
             `metric_overlay_config.show_overlay` が True のときに Haze/Gloss/
             DOI 指標のオーバーレイを重ねる。
@@ -227,17 +230,25 @@ def plot_bsdf_2d_heatmap(
     data = np.log10(np.maximum(bsdf, BSDF_LOG_FLOOR_DEFAULT)) if log_scale else bsdf
     label = "log₁₀(BSDF)" if log_scale else AXIS_BSDF_LABEL
 
-    img = hv.Image(
-        (u_axis, v_axis, data.T),
-        kdims=["u = sin θ_s cos φ_s", "v = sin θ_s sin φ_s"],
-        vdims=[label],
-    ).opts(
+    img_opts: dict[str, Any] = dict(
         title=title,
         frame_width=400,
         frame_height=400,
         colorbar=True,
         cmap="viridis",
     )
+    if clim is not None:
+        vmin, vmax = float(clim[0]), float(clim[1])
+        if log_scale:
+            vmin = np.log10(max(vmin, BSDF_LOG_FLOOR_DEFAULT))
+            vmax = np.log10(max(vmax, BSDF_LOG_FLOOR_DEFAULT))
+        img_opts["clim"] = (vmin, vmax)
+
+    img = hv.Image(
+        (u_axis, v_axis, data.T),
+        kdims=["u = sin θ_s cos φ_s", "v = sin θ_s sin φ_s"],
+        vdims=[label],
+    ).opts(**img_opts)
 
     # 半球境界円のオーバーレイ
     theta_boundary = np.linspace(0, 2 * np.pi, 200)
@@ -651,12 +662,20 @@ def _build_condition_panel(
     log_rmse_by_method: dict[str, float],
     xscale: str = "linear",
     secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
+    cscale: str | None = None,
+    clim: tuple[float, float] | None = None,
     metrics_config: dict[str, Any] | None = None,
     metric_overlay_config: dict[str, Any] | None = None,
     n1: float = 1.0,
     n2: float = 1.5,
 ) -> Any:
-    """1 条件分の 1D オーバーレイ＋2D ヒートマップ Panel を生成する。"""
+    """1 条件分の 1D オーバーレイ＋2D ヒートマップ Panel を生成する。
+
+    Args:
+        cscale: 2D カラーバースケール 'linear' / 'log'。None の場合は 1D Y 軸の
+            `scale` に従う（後方互換）。
+        clim: 2D カラーバー範囲 (vmin, vmax) [sr⁻¹]。None で自動。
+    """
     _check_holoviews()
 
     # 1D オーバーレイ（FFT/PSD/MultiLayer/measured を自動重ね描き）
@@ -671,6 +690,7 @@ def _build_condition_panel(
     method_order = ["FFT", "PSD", "MultiLayer", "measured"]
     methods_in_df = [m for m in method_order if m in df_cond["method"].unique()]
 
+    effective_cscale = cscale if cscale is not None else scale
     heatmap_plots = []
     for method in methods_in_df:
         df_m = df_cond[df_cond["method"] == method]
@@ -680,7 +700,8 @@ def _build_condition_panel(
         hm = plot_bsdf_2d_heatmap(
             u_g, v_g, bsdf_2d,
             title=f"2D [{method}]",
-            log_scale=(scale == "log"),
+            log_scale=(effective_cscale == "log"),
+            clim=clim,
             metrics_config=metrics_config,
             metric_overlay_config=metric_overlay_config,
             theta_i_deg=theta_i, mode=mode, n1=n1, n2=n2,
@@ -709,6 +730,8 @@ def plot_bsdf_report(
     title: str = "BSDF Report",
     n_grid: int = 256,
     secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
+    cscale: str | None = None,
+    clim: tuple[float, float] | None = None,
     metrics_config: dict[str, Any] | None = None,
     metric_overlay_config: dict[str, Any] | None = None,
     n1: float = 1.0,
@@ -728,6 +751,9 @@ def plot_bsdf_report(
             Tab 内 1D プロットに適用される。
         title: レポートタイトル
         n_grid: 2D ヒートマップのグリッドサイズ
+        cscale: 2D カラーバースケール 'linear' / 'log'。None の場合は `scale`
+            に従う（後方互換、1D Y 軸と同期）。
+        clim: 2D カラーバー範囲 (vmin, vmax) [sr⁻¹]。None で自動。
 
     Returns:
         Panel Column レイアウト
@@ -780,6 +806,7 @@ def plot_bsdf_report(
             cond_panel = _build_condition_panel(
                 df, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
                 xscale=xscale, secondary_x_unit=secondary_x_unit,
+                cscale=cscale, clim=clim,
                 metrics_config=metrics_config,
                 metric_overlay_config=metric_overlay_config,
                 n1=n1, n2=n2,
@@ -805,6 +832,7 @@ def plot_bsdf_report(
             cond_panel = _build_condition_panel(
                 df_cond, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
                 xscale=xscale, secondary_x_unit=secondary_x_unit,
+                cscale=cscale, clim=clim,
                 metrics_config=metrics_config,
                 metric_overlay_config=metric_overlay_config,
                 n1=n1, n2=n2,

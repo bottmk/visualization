@@ -489,6 +489,71 @@ class TestPlotBsdf2DHeatmapWithOverlay:
         assert ellipses[0].x == pytest.approx(float(np.sin(np.deg2rad(30.0))))
 
 
+class TestPlotBsdf2DHeatmapClim:
+    """plot_bsdf_2d_heatmap の clim 引数（カラーバー範囲固定）の統合テスト。"""
+
+    def _uv_bsdf(self, n=17):
+        u_axis = np.linspace(-1.0, 1.0, n)
+        v_axis = np.linspace(-1.0, 1.0, n)
+        U, V = np.meshgrid(u_axis, v_axis, indexing="ij")
+        bsdf = np.exp(-(U**2 + V**2) / 0.1)
+        return U, V, bsdf
+
+    def _extract_image_opts(self, result):
+        """Overlay/Image から hv.Image を取り出し opts 辞書を返す。"""
+        img = None
+        for item in result if hasattr(result, "__iter__") else [result]:
+            if isinstance(item, hv.Image):
+                img = item
+                break
+        assert img is not None, "hv.Image が見つからない"
+        return img.opts.get("plot").kwargs | img.opts.get("style").kwargs
+
+    def test_clim_none_leaves_image_without_fixed_range(self):
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(U, V, bsdf, clim=None, log_scale=True)
+        opts = self._extract_image_opts(result)
+        assert "clim" not in opts
+
+    def test_clim_linear_passes_values_directly(self):
+        """log_scale=False のとき clim は raw 値がそのまま渡る。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(
+            U, V, bsdf, log_scale=False, clim=(0.0, 1.0),
+        )
+        opts = self._extract_image_opts(result)
+        assert opts["clim"] == pytest.approx((0.0, 1.0))
+
+    def test_clim_log_applies_log10_conversion(self):
+        """log_scale=True のとき clim は log10 変換されて適用される。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(
+            U, V, bsdf, log_scale=True, clim=(1e-6, 1e2),
+        )
+        opts = self._extract_image_opts(result)
+        vmin, vmax = opts["clim"]
+        assert vmin == pytest.approx(-6.0)
+        assert vmax == pytest.approx(2.0)
+
+    def test_clim_log_floors_non_positive(self):
+        """log_scale=True で clim に 0 / 負値が来ても BSDF_LOG_FLOOR_DEFAULT で
+        クリップされ log10 が NaN や -inf にならない。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(
+            U, V, bsdf, log_scale=True, clim=(0.0, 1.0),
+        )
+        opts = self._extract_image_opts(result)
+        vmin, vmax = opts["clim"]
+        assert np.isfinite(vmin) and np.isfinite(vmax)
+        # 0.0 → log10(1e-10) = -10 にクリップ
+        assert vmin == pytest.approx(-10.0)
+        assert vmax == pytest.approx(0.0)
+
+
 class TestOverlayDOIComb1D:
     def test_stripes_added(self):
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_1d

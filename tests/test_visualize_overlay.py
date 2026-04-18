@@ -177,6 +177,31 @@ class TestBsdfReportMultiCondition:
         result = plot_bsdf_report(meas_only)
         assert result is not None
 
+    def test_cscale_independent_from_scale(self, single_condition_df):
+        """cscale を指定すると scale とは独立に 2D カラーバー対数/線形が切り替わる。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_report
+        # Y軸 linear、カラーバーだけ log という組み合わせ
+        result = plot_bsdf_report(
+            single_condition_df, scale="linear", cscale="log",
+        )
+        assert result is not None
+
+    def test_clim_passthrough(self, single_condition_df):
+        """clim 引数が plot_bsdf_report を通って例外なく描画できる。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_report
+        result = plot_bsdf_report(
+            single_condition_df, scale="log", clim=(1e-6, 1e2),
+        )
+        assert result is not None
+
+    def test_cscale_defaults_to_scale_for_back_compat(self, single_condition_df):
+        """cscale=None（未指定）のとき、従来通り scale に従う（後方互換）。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_report
+        result = plot_bsdf_report(
+            single_condition_df, scale="linear",
+        )
+        assert result is not None
+
 
 # ── visualize CLI 統合 ───────────────────────────────────────────────────────
 

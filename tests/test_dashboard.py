@@ -140,6 +140,71 @@ class TestCreateDashboard:
         assert isinstance(layout, pn.Column)
 
 
+# ── 軸制御ウィジェット ───────────────────────────────────────────────────────
+
+
+class TestMakeAxisControls:
+    """`_make_range_controls` と `_make_axis_controls` の汎用化テスト。"""
+
+    def _dashboard(self, base_cfg, tmp_path):
+        from bsdf_sim.visualization.dynamicmap import create_dashboard_from_config
+        base_cfg["surface"] = {
+            "model": "RandomRoughSurface",
+            "random_rough": {"rq_um": 0.005, "lc_um": 2.0, "fractal_dim": 2.5},
+        }
+        cfg_path = _write_cfg(tmp_path, base_cfg)
+        return create_dashboard_from_config(cfg_path, preview_grid_size_idle=64)
+
+    def test_make_range_controls_generates_checkbox_and_inputs(
+        self, base_cfg, tmp_path,
+    ):
+        import panel as pn
+        dash = self._dashboard(base_cfg, tmp_path)
+        fix, vmin, vmax = dash._make_range_controls(
+            label="テスト", default_min=0.5, default_max=5.0,
+        )
+        assert isinstance(fix, pn.widgets.Checkbox)
+        assert isinstance(vmin, pn.widgets.FloatInput)
+        assert isinstance(vmax, pn.widgets.FloatInput)
+        assert vmin.value == pytest.approx(0.5)
+        assert vmax.value == pytest.approx(5.0)
+        assert "テスト" in fix.name
+
+    def test_make_ylim_controls_delegates_to_range(self, base_cfg, tmp_path):
+        """後方互換: _make_ylim_controls は _make_range_controls に委譲される。"""
+        dash = self._dashboard(base_cfg, tmp_path)
+        fix, ymin, ymax = dash._make_ylim_controls()
+        assert ymin.value == pytest.approx(1e-8)
+        assert ymax.value == pytest.approx(1e4)
+
+    def test_make_axis_controls_returns_all_1d_and_2d_widgets(
+        self, base_cfg, tmp_path,
+    ):
+        """1D (yscale/xscale/fix_ylim/ymin/ymax/secondary_x) +
+        2D (cscale/fix_clim/cmin/cmax) = 10 ウィジェットが返る。"""
+        dash = self._dashboard(base_cfg, tmp_path)
+        ctrls = dash._make_axis_controls()
+        expected_keys = {
+            "yscale", "xscale", "fix_ylim", "ymin", "ymax", "secondary_x",
+            "cscale", "fix_clim", "cmin", "cmax",
+        }
+        assert set(ctrls.keys()) == expected_keys
+
+    def test_cscale_default_is_log(self, base_cfg, tmp_path):
+        dash = self._dashboard(base_cfg, tmp_path)
+        ctrls = dash._make_axis_controls()
+        assert ctrls["cscale"].value == "log"
+        assert ctrls["cscale"].options == ["linear", "log"]
+
+    def test_clim_widgets_independent_from_ylim(self, base_cfg, tmp_path):
+        """cmin/cmax は ymin/ymax と別インスタンスで相互独立。"""
+        dash = self._dashboard(base_cfg, tmp_path)
+        ctrls = dash._make_axis_controls()
+        ctrls["ymin"].value = 1e-3
+        ctrls["cmin"].value = 1e-5
+        assert ctrls["ymin"].value != ctrls["cmin"].value
+
+
 # ── 実測 BSDF オーバーレイ ───────────────────────────────────────────────────
 
 

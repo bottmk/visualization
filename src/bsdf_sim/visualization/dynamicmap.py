@@ -305,6 +305,7 @@ class _BaseBSDFDashboard(ABC):
     def _make_2d_heatmap_with_overlay(
         self, u: np.ndarray, v: np.ndarray, bsdf: np.ndarray,
         log_scale: bool = True,
+        clim: tuple[float, float] | None = None,
     ) -> Any:
         """BSDF 2D ヒートマップに config.visualization.metric_overlay を適用した
         HoloViews Overlay を返す。config 未指定または show_overlay=False の場合は
@@ -322,6 +323,7 @@ class _BaseBSDFDashboard(ABC):
             U, V, bsdf,
             title=f"2D BSDF · {self._title_suffix()}",
             log_scale=log_scale,
+            clim=clim,
             metrics_config=self.metrics_config,
             metric_overlay_config=self.metric_overlay_config,
             theta_i_deg=self.theta_i_deg, mode=mode_str,
@@ -332,34 +334,55 @@ class _BaseBSDFDashboard(ABC):
     def create_dashboard(self) -> Any:
         """サブクラスが UI を組み立てて Panel Layout を返す。"""
 
-    def _make_ylim_controls(
-        self,
+    @staticmethod
+    def _make_range_controls(
+        *,
+        label: str,
+        default_min: float,
+        default_max: float,
+        fmt: str = "0.00e+00",
     ) -> tuple[Any, Any, Any]:
-        """Y軸範囲固定用のウィジェット一式を生成する。
+        """範囲固定 UI（Checkbox + 最小 FloatInput + 最大 FloatInput）を生成する。
+
+        Y 軸範囲固定（1D）とカラーバー範囲固定（2D）の両方で使う汎用ヘルパー。
+
+        Args:
+            label: 表示接頭辞（例 "Y軸" / "カラー"）
+            default_min: FloatInput 初期値（下限）
+            default_max: FloatInput 初期値（上限）
+            fmt: FloatInput の format 指定
 
         Returns:
-            (checkbox, ymin_input, ymax_input)
+            (checkbox, min_input, max_input)
         """
-        fix_ylim = pn.widgets.Checkbox(name="Y軸範囲を固定", value=False)
-        ymin_input = pn.widgets.FloatInput(
-            name="Y最小", value=1e-8, format="0.00e+00",
+        fix = pn.widgets.Checkbox(name=f"{label}範囲を固定", value=False)
+        vmin = pn.widgets.FloatInput(
+            name=f"{label}最小", value=default_min, format=fmt,
         )
-        ymax_input = pn.widgets.FloatInput(
-            name="Y最大", value=1e4, format="0.00e+00",
+        vmax = pn.widgets.FloatInput(
+            name=f"{label}最大", value=default_max, format=fmt,
         )
-        return fix_ylim, ymin_input, ymax_input
+        return fix, vmin, vmax
+
+    def _make_ylim_controls(self) -> tuple[Any, Any, Any]:
+        """Y軸範囲固定用のウィジェット一式（後方互換ラッパー）。"""
+        return self._make_range_controls(
+            label="Y軸", default_min=1e-8, default_max=1e4,
+        )
 
     def _make_axis_controls(self) -> dict[str, Any]:
-        """Y log/linear + X log/linear + Y 範囲固定 + 副軸ユニット UI を一括生成する。
+        """1D/2D の軸制御 UI を一括生成する。
 
-        3 ダッシュボード（RandomRough / Spherical / Measured）で同じ UI を
-        繰り返し定義していた重複を集約したヘルパー。
+        3 ダッシュボード（RandomRough / Spherical / Measured）で重複していた
+        軸制御ウィジェット定義を集約するヘルパー。
 
         Returns:
-            {"yscale": RadioButtonGroup(Y軸スケール),
-             "xscale": RadioButtonGroup(X軸スケール),
+            {"yscale": RadioButtonGroup(1D Y軸 log/linear),
+             "xscale": RadioButtonGroup(1D X軸 log/linear),
              "fix_ylim": Checkbox, "ymin": FloatInput, "ymax": FloatInput,
-             "secondary_x": Select(副軸ユニット)}
+             "secondary_x": Select(1D 上段副軸ユニット),
+             "cscale": RadioButtonGroup(2D カラーバー log/linear),
+             "fix_clim": Checkbox, "cmin": FloatInput, "cmax": FloatInput}
         """
         yscale = pn.widgets.RadioButtonGroup(
             name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
@@ -367,7 +390,9 @@ class _BaseBSDFDashboard(ABC):
         xscale = pn.widgets.RadioButtonGroup(
             name="X軸（角度）スケール", options=["linear", "log"], value="linear",
         )
-        fix_ylim, ymin, ymax = self._make_ylim_controls()
+        fix_ylim, ymin, ymax = self._make_range_controls(
+            label="Y軸", default_min=1e-8, default_max=1e4,
+        )
         secondary_x = pn.widgets.Select(
             name="上段副軸",
             options={
@@ -379,6 +404,12 @@ class _BaseBSDFDashboard(ABC):
             },
             value=self.secondary_x_unit_default,
         )
+        cscale = pn.widgets.RadioButtonGroup(
+            name="カラーバー（2D）スケール", options=["linear", "log"], value="log",
+        )
+        fix_clim, cmin, cmax = self._make_range_controls(
+            label="カラー", default_min=1e-8, default_max=1e4,
+        )
         return {
             "yscale": yscale,
             "xscale": xscale,
@@ -386,6 +417,10 @@ class _BaseBSDFDashboard(ABC):
             "ymin": ymin,
             "ymax": ymax,
             "secondary_x": secondary_x,
+            "cscale": cscale,
+            "fix_clim": fix_clim,
+            "cmin": cmin,
+            "cmax": cmax,
         }
 
     def serve(
@@ -575,12 +610,16 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             scale=ctrls["yscale"], xscale=ctrls["xscale"],
             fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
             sec_x=ctrls["secondary_x"],
+            cscale=ctrls["cscale"],
+            fix_c=ctrls["fix_clim"], cmin=ctrls["cmin"], cmax=ctrls["cmax"],
         )
         def update_plot(
             rq: float, lc: float, fractal: float,
             scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
             sec_x: str,
+            cscale: str,
+            fix_c: bool, cmin: float, cmax: float,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_preview(
@@ -590,13 +629,14 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
                     f"BSDF (N={self.preview_grid_size_idle}) · {self._title_suffix()}"
                 )
                 ylim = (ymin, ymax) if fix else None
+                clim = (cmin, cmax) if fix_c else None
                 plot_1d = _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                     secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
                 plot_2d = self._make_2d_heatmap_with_overlay(
-                    u, v, bsdf, log_scale=(scale == "log"),
+                    u, v, bsdf, log_scale=(cscale == "log"), clim=clim,
                 )
                 return pn.Row(plot_1d, plot_2d)
             except Exception as e:
@@ -623,6 +663,8 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
                     ctrls["yscale"], ctrls["xscale"],
                     ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
                     ctrls["secondary_x"],
+                    ctrls["cscale"],
+                    ctrls["fix_clim"], ctrls["cmin"], ctrls["cmax"],
                     pn.pane.Markdown(update_metrics),
                     width=300,
                 ),
@@ -727,6 +769,8 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             scale=ctrls["yscale"], xscale=ctrls["xscale"],
             fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
             sec_x=ctrls["secondary_x"],
+            cscale=ctrls["cscale"],
+            fix_c=ctrls["fix_clim"], cmin=ctrls["cmin"], cmax=ctrls["cmax"],
         )
         def update_plot(
             radius: float, pitch: float, base: float,
@@ -734,6 +778,8 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
             sec_x: str,
+            cscale: str,
+            fix_c: bool, cmin: float, cmax: float,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_preview(
@@ -744,13 +790,14 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                     f"BSDF (N={self.preview_grid_size_idle}) · {self._title_suffix()}"
                 )
                 ylim = (ymin, ymax) if fix else None
+                clim = (cmin, cmax) if fix_c else None
                 plot_1d = _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                     secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
                 plot_2d = self._make_2d_heatmap_with_overlay(
-                    u, v, bsdf, log_scale=(scale == "log"),
+                    u, v, bsdf, log_scale=(cscale == "log"), clim=clim,
                 )
                 return pn.Row(plot_1d, plot_2d)
             except Exception as e:
@@ -784,6 +831,8 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                     ctrls["yscale"], ctrls["xscale"],
                     ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
                     ctrls["secondary_x"],
+                    ctrls["cscale"],
+                    ctrls["fix_clim"], ctrls["cmin"], ctrls["cmax"],
                     pn.pane.Markdown(update_metrics),
                     width=320,
                 ),
@@ -820,11 +869,15 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
             scale=ctrls["yscale"], xscale=ctrls["xscale"],
             fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
             sec_x=ctrls["secondary_x"],
+            cscale=ctrls["cscale"],
+            fix_c=ctrls["fix_clim"], cmin=ctrls["cmin"], cmax=ctrls["cmax"],
         )
         def update_plot(
             scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
             sec_x: str,
+            cscale: str,
+            fix_c: bool, cmin: float, cmax: float,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_bsdf_for_model(
@@ -834,13 +887,14 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
                     f"BSDF (N={self.preview_grid_size_idle}) · {self._title_suffix()}"
                 )
                 ylim = (ymin, ymax) if fix else None
+                clim = (cmin, cmax) if fix_c else None
                 plot_1d = _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                     secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
                 plot_2d = self._make_2d_heatmap_with_overlay(
-                    u, v, bsdf, log_scale=(scale == "log"),
+                    u, v, bsdf, log_scale=(cscale == "log"), clim=clim,
                 )
                 return pn.Row(plot_1d, plot_2d)
             except Exception as e:
@@ -869,6 +923,8 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
                     ctrls["yscale"], ctrls["xscale"],
                     ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
                     ctrls["secondary_x"],
+                    ctrls["cscale"],
+                    ctrls["fix_clim"], ctrls["cmin"], ctrls["cmax"],
                     pn.pane.Markdown(metrics_md),
                     width=320,
                 ),
