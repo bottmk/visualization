@@ -19,6 +19,11 @@ from .optical import (
     compute_log_rmse,
     compute_sparkle,
 )
+from .sparkle_extended import (
+    compute_sparkle_l3prime,
+    compute_sparkle_l4,
+    compute_sparkle_l5,
+)
 from .surface import compute_all_surface_metrics, compute_ra, compute_rq, compute_rz, compute_sdq
 
 logger = logging.getLogger(__name__)
@@ -83,6 +88,9 @@ __all__ = [
     "compute_doi_comb",
     "compute_doi_astm",
     "compute_sparkle",
+    "compute_sparkle_l3prime",
+    "compute_sparkle_l4",
+    "compute_sparkle_l5",
     "compute_log_rmse",
     "compute_all_optical_metrics",
     "compute_rq",
