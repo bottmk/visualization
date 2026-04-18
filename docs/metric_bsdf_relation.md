@@ -12,11 +12,11 @@
 
 ```mermaid
 flowchart TD
-    HM["HeightMap h(x,y) [μm]"]
-    PH["step 1: 表面位相生成（Kirchhoff スカラー回折）<br/>φ(x,y) = phase_surface(h, θ_i, n1, n2, mode) + phase_tilt(θ_i, φ_i)<br/>U(x,y) = exp(i·φ(x,y))"]
+    HM["HeightMap<br/>h(x,y) 単位: μm"]
+    PH["step 1: 表面位相生成<br/>Kirchhoff スカラー回折<br/>φ = phase_surface + phase_tilt<br/>U = exp(i·φ)"]
     FFT["step 2: 2D FFT<br/>I(fx, fy) = |FFT(U)|²"]
-    UV["step 3: 方向余弦マッピング<br/>u = fx·λ (+offset), v = fy·λ (+offset)"]
-    BSDF["BSDF(u,v) = I(fx,fy) / (N²·dx²·cos θ_s) [sr⁻¹]"]
+    UV["step 3: 方向余弦マッピング<br/>u = fx·λ (+ offset)<br/>v = fy·λ (+ offset)"]
+    BSDF["BSDF(u, v)<br/>= I / (N²·dx²·cos θ_s)<br/>単位: sr⁻¹"]
     BR{{"step 4: 指標ごとの窓・積分・集計"}}
     HZ["Haze<br/>全半球 vs 2.5°外"]
     GL["Gloss<br/>長方形絞り + 黒ガラス"]
