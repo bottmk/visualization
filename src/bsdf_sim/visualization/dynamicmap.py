@@ -39,7 +39,12 @@ from ..models.base import BaseSurfaceModel, HeightMap
 from ..models.random_rough import RandomRoughSurface
 from ..models.spherical_array import SphericalArraySurface
 from ..optics.fft_bsdf import compute_bsdf_fft
-from .constants import BSDF_LOG_FLOOR_DEFAULT, MEASURED_PHI_S_TOL_DEG
+from .constants import (
+    AXIS_BSDF_LABEL,
+    AXIS_THETA_S_LABEL,
+    BSDF_LOG_FLOOR_DEFAULT,
+    MEASURED_PHI_S_TOL_DEG,
+)
 from .profile_extract import slice_phi0, sort_and_floor
 
 logger = logging.getLogger(__name__)
@@ -115,8 +120,8 @@ def _make_1d_overlay(
 
     sim_curve = hv.Curve(
         (x_sim, y_sim),
-        kdims=["散乱角 θ_s [deg]"],
-        vdims=["BSDF [sr⁻¹]"],
+        kdims=[AXIS_THETA_S_LABEL],
+        vdims=[AXIS_BSDF_LABEL],
         label="FFT 計算",
     ).opts(color="blue", line_width=2)
 
@@ -132,8 +137,8 @@ def _make_1d_overlay(
             if len(x_meas) > 0:
                 meas_scatter = hv.Scatter(
                     (x_meas, y_meas),
-                    kdims=["散乱角 θ_s [deg]"],
-                    vdims=["BSDF [sr⁻¹]"],
+                    kdims=[AXIS_THETA_S_LABEL],
+                    vdims=[AXIS_BSDF_LABEL],
                     label="実測データ",
                 ).opts(
                     color="black", size=8, marker="circle",

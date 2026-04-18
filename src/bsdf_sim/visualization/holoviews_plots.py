@@ -14,7 +14,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .constants import BSDF_LOG_FLOOR_DEFAULT, MEASURED_PHI_S_TOL_DEG
+from .constants import (
+    AXIS_BSDF_LABEL,
+    AXIS_THETA_S_LABEL,
+    BSDF_LOG_FLOOR_DEFAULT,
+    MEASURED_PHI_S_TOL_DEG,
+)
 from .profile_extract import sort_and_floor
 
 try:
@@ -108,12 +113,12 @@ def plot_bsdf_1d_overlay(
 
         if method == "measured":
             curve = hv.Scatter(
-                (x, y), kdims=["散乱角 θ_s [deg]"], vdims=["BSDF [sr⁻¹]"],
+                (x, y), kdims=[AXIS_THETA_S_LABEL], vdims=[AXIS_BSDF_LABEL],
                 label=style["label"],
             ).opts(color=style["color"], size=style["size"])
         else:
             curve = hv.Curve(
-                (x, y), kdims=["散乱角 θ_s [deg]"], vdims=["BSDF [sr⁻¹]"],
+                (x, y), kdims=[AXIS_THETA_S_LABEL], vdims=[AXIS_BSDF_LABEL],
                 label=style["label"],
             ).opts(color=style["color"], line_dash=style["line_dash"], line_width=2)
 
@@ -126,7 +131,7 @@ def plot_bsdf_1d_overlay(
     if show_haze_boundary:
         # VLine は凡例に出ないので Curve で 2 点線を代用してラベルを付ける
         # y 範囲は適当に広め（Curve データの min/max を取得）
-        y_vals = np.concatenate([c.data["BSDF [sr⁻¹]"] if hasattr(c, "data") else [] for c in curves])
+        y_vals = np.concatenate([c.data[AXIS_BSDF_LABEL] if hasattr(c, "data") else [] for c in curves])
         y_vals = np.array([v for v in y_vals if v is not None and np.isfinite(v)])
         if y_vals.size > 0:
             y_lo = float(y_vals.min())
@@ -135,8 +140,8 @@ def plot_bsdf_1d_overlay(
             y_lo = max(y_lo, BSDF_LOG_FLOOR_DEFAULT)
             boundary = hv.Curve(
                 [(haze_half_angle_deg, y_lo), (haze_half_angle_deg, y_hi)],
-                kdims=["散乱角 θ_s [deg]"],
-                vdims=["BSDF [sr⁻¹]"],
+                kdims=[AXIS_THETA_S_LABEL],
+                vdims=[AXIS_BSDF_LABEL],
                 label=f"Haze {haze_half_angle_deg}°境界",
             ).opts(color="white", line_dash="dashed", line_width=1.5)
             curves.append(boundary)
@@ -176,7 +181,7 @@ def plot_bsdf_2d_heatmap(
     v_axis = v_grid[0, :]
 
     data = np.log10(np.maximum(bsdf, BSDF_LOG_FLOOR_DEFAULT)) if log_scale else bsdf
-    label = "log₁₀(BSDF)" if log_scale else "BSDF [sr⁻¹]"
+    label = "log₁₀(BSDF)" if log_scale else AXIS_BSDF_LABEL
 
     img = hv.Image(
         (u_axis, v_axis, data.T),

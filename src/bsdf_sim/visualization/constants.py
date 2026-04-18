@@ -18,3 +18,9 @@ BSDF_LOG_FLOOR_DEFAULT: float = 1e-10
 # 多いため、ある程度の許容幅が必要。dashboard と visualize レポートで同じ値を
 # 使うよう定数化（以前は両方 6.0 で重複）。
 MEASURED_PHI_S_TOL_DEG: float = 6.0
+
+# HoloViews の 1D BSDF プロットで使う軸ラベル（kdims/vdims 名・colorbar 名）。
+# dashboard `_make_1d_overlay` と visualize レポート `plot_bsdf_1d_overlay` の
+# 両方で同じ文字列を直値で書いていたため、ドリフト防止のため定数化する。
+AXIS_THETA_S_LABEL: str = "散乱角 θ_s [deg]"
+AXIS_BSDF_LABEL: str = "BSDF [sr⁻¹]"
