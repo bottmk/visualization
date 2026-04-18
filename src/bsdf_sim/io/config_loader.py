@@ -370,6 +370,17 @@ class BSDFConfig:
             )
         return mode
 
+    @property
+    def fft_apply_fresnel(self) -> bool:
+        """FFT 法出力に θ_i のフレネル反射/透過率を後掛けするか。
+
+        True の場合、BRDF では R(θ_i)=(|r_s|²+|r_p|²)/2、BTDF では
+        T(θ_i)=(n2·cos θ_t)/(n1·cos θ_i)·(|t_s|²+|t_p|²)/2 を全 BSDF 値に掛ける。
+        θ_s 依存性は含まれないヒューリスティック補正なので、厳密には PSD 法を
+        使うのが本筋。
+        """
+        return bool(self.fft.get("apply_fresnel", False))
+
     # ── 代表波長（規格準拠の Haze/Gloss/DOI 計算用）────────────────────────
 
     @property
@@ -377,12 +388,14 @@ class BSDFConfig:
         """Haze/Gloss/DOI を計算する代表波長 [μm]。デフォルト 0.555（V(λ) ピーク）。
 
         JIS K 7136 / ISO 14782 / ASTM D1003（Haze）、ISO 2813 / ASTM D523
-        （Gloss）、ASTM D5767（DOI）等の規格は CIE 白色光源 + 明所視応答
+        （Gloss）、JIS K 7374 / ASTM E430（DOI）等の規格は CIE 白色光源 + 明所視応答
         V(λ) で規定されている。本実装は V(λ) ピーク波長（555nm）での単波長
         近似を採用する（AG フィルム等、凹凸 >> 波長の構造では近似誤差 1〜5%）。
 
         `simulation.wavelength_um` が list でも、Haze/Gloss/DOI の値は
-        この 1 波長でのみ計算されるため、列数は常に `haze_fft` / `gloss_fft`
-        / `doi_fft` の 1 つずつに固定される。
+        この 1 波長でのみ計算される。メトリクス名は <name>_<method>_<deg>_<mode>
+        （例: `haze_fft_0_t`, `gloss_fft_60_r`, `doi_nser_fft_0_t`,
+        `doi_comb_fft_0_t`, `doi_astm_fft_20_r`）で、各規格 (θ_i, mode) に
+        対応する列が生成される。
         """
         return float(self.metrics.get("representative_wavelength_um", 0.555))

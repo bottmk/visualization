@@ -169,6 +169,7 @@ def simulate(
                 polarization=cond["polarization"],
                 is_btdf=is_btdf,
                 fft_mode=cfg.fft_mode,
+                apply_fresnel=cfg.fft_apply_fresnel,
             )
             method_bsdf_by_cond[cond_key]["fft"] = (u, v, bsdf_fft)
             if u_primary is None:
@@ -178,7 +179,10 @@ def simulate(
                 theta_i, cond["phi_i_deg"], wl_um, cond["polarization"],
                 is_btdf=is_btdf,
             ))
-            logger.info(f"          FFT 完了 ({_elapsed(t0)}, mode={cfg.fft_mode})")
+            logger.info(
+                f"          FFT 完了 ({_elapsed(t0)}, mode={cfg.fft_mode}"
+                f"{', +Fresnel' if cfg.fft_apply_fresnel else ''})"
+            )
 
         if method in ("psd", "both"):
             t0 = time.perf_counter()
@@ -204,96 +208,100 @@ def simulate(
             logger.info(f"          PSD 完了 ({_elapsed(t0)})")
 
     # ── 代表波長での Haze/Gloss/DOI 用 BSDF を確保 ────────────────────────
-    # 規格（JIS K 7136 / ISO 14782 / ASTM D1003 等）は CIE 白色光源 + V(λ)
+    # 規格（JIS K 7136 / ISO 2813 / JIS K 7374 / ASTM E430 等）は CIE 白色光源 + V(λ)
     # で規定されており、本実装は V(λ) ピーク付近の単波長近似を採用する。
     # 代表波長は metrics.representative_wavelength_um（デフォルト 0.555μm）。
     #
-    # Haze/Gloss/DOI のどれかが有効なときだけ代表波長条件を確保する。
-    standards_enabled = any(
-        cfg.metrics.get(k) is not None and cfg.metrics[k].get("enabled", True)
-        for k in ("haze", "gloss", "doi")
-    )
+    # 各指標の規格条件 (θ_i, mode) に必要な BSDF 条件を列挙し、sim リストに
+    # なければ自動追加する（Q1.(a) 方針）。
     rep_wl_um = cfg.representative_wavelength_um
-    # 代表条件の θ_i, mode は sim 条件リストの先頭を採用
     primary_cond = conditions[0]
-    rep_theta_i = float(primary_cond["theta_i_deg"])
-    rep_mode = str(primary_cond["mode"])
-    rep_is_btdf = rep_mode == "BTDF"
 
-    # 既存の計算済み BSDF に代表波長と一致するものがあるか検索
-    rep_key: tuple | None = None
-    for cond_key in method_bsdf_by_cond.keys():
-        wl_k, theta_k, mode_k = cond_key
-        if (
-            abs(wl_k - rep_wl_um) < 1e-6
-            and abs(theta_k - rep_theta_i) < 1e-6
-            and mode_k == rep_mode
-        ):
-            rep_key = cond_key
-            break
+    # 各指標の規格条件を集める: (wl_um, theta_deg, mode) の set
+    required_standard_conds: set[tuple[float, float, str]] = set()
+    m = cfg.metrics
+    if m.get("haze") is not None and m["haze"].get("enabled", True):
+        required_standard_conds.add((rep_wl_um, 0.0, "BTDF"))
+    if m.get("gloss") is not None and m["gloss"].get("enabled", True):
+        for ang in m["gloss"].get("enabled_angles", [20, 60, 85]):
+            required_standard_conds.add((rep_wl_um, float(ang), "BRDF"))
+    if m.get("doi_nser") is not None and m["doi_nser"].get("enabled", True):
+        required_standard_conds.add((rep_wl_um, 0.0, "BTDF"))
+    if m.get("doi_comb") is not None and m["doi_comb"].get("enabled", True):
+        for mc in m["doi_comb"].get("enabled_modes", ["t", "r"]):
+            mode_std = "BTDF" if mc == "t" else "BRDF"
+            required_standard_conds.add((rep_wl_um, 0.0, mode_std))
+    if m.get("doi_astm") is not None and m["doi_astm"].get("enabled", True):
+        for ang in m["doi_astm"].get("enabled_angles", [20, 30]):
+            required_standard_conds.add((rep_wl_um, float(ang), "BRDF"))
 
-    if not standards_enabled:
-        # Haze/Gloss/DOI を使わない → 代表波長 sim は不要
-        pass
-    elif rep_key is None:
-        # リスト内に代表波長が無い → 追加で 1 条件計算
+    def _find_existing(wl: float, theta: float, mode_s: str) -> tuple | None:
+        for ck in method_bsdf_by_cond:
+            wl_k, t_k, m_k = ck
+            if (
+                abs(wl_k - wl) < 1e-6
+                and abs(t_k - theta) < 1e-6
+                and m_k == mode_s
+            ):
+                return ck
+        return None
+
+    # 規格条件のうち既存に無いものを追加 sim
+    for (wl_std, theta_std, mode_std) in sorted(required_standard_conds):
+        if _find_existing(wl_std, theta_std, mode_std) is not None:
+            continue
+        is_btdf_std = mode_std == "BTDF"
         logger.info(
-            f"代表波長 {rep_wl_um * 1000:.0f}nm の追加 sim を実行中 "
-            f"(θ_i={rep_theta_i:.1f}°, {rep_mode}, Haze/Gloss/DOI 用)"
+            f"規格条件の追加 sim を実行中: "
+            f"λ={wl_std * 1000:.0f}nm, θ_i={theta_std:.1f}°, {mode_std}"
         )
-        rep_key = (rep_wl_um, rep_theta_i, rep_mode)
-        method_bsdf_by_cond[rep_key] = {}
-
+        std_key = (wl_std, theta_std, mode_std)
+        method_bsdf_by_cond[std_key] = {}
         if method in ("fft", "both"):
             t0 = time.perf_counter()
             u_r, v_r, bsdf_r = compute_bsdf_fft(
                 height_map=hm,
-                wavelength_um=rep_wl_um,
-                theta_i_deg=rep_theta_i,
+                wavelength_um=wl_std,
+                theta_i_deg=theta_std,
                 phi_i_deg=primary_cond["phi_i_deg"],
                 n1=primary_cond["n1"],
                 n2=primary_cond["n2"],
                 polarization=primary_cond["polarization"],
-                is_btdf=rep_is_btdf,
+                is_btdf=is_btdf_std,
                 fft_mode=cfg.fft_mode,
+                apply_fresnel=cfg.fft_apply_fresnel,
             )
-            method_bsdf_by_cond[rep_key]["fft"] = (u_r, v_r, bsdf_r)
+            method_bsdf_by_cond[std_key]["fft"] = (u_r, v_r, bsdf_r)
             if u_primary is None:
                 u_primary, v_primary, bsdf_primary = u_r, v_r, bsdf_r
             all_dfs.append(build_dataframe(
                 u_r, v_r, bsdf_r, "FFT",
-                rep_theta_i, primary_cond["phi_i_deg"], rep_wl_um,
-                primary_cond["polarization"], is_btdf=rep_is_btdf,
+                theta_std, primary_cond["phi_i_deg"], wl_std,
+                primary_cond["polarization"], is_btdf=is_btdf_std,
             ))
-            logger.info(f"          代表波長 FFT 完了 ({_elapsed(t0)})")
-
+            logger.info(f"          FFT 完了 ({_elapsed(t0)})")
         if method in ("psd", "both"):
             t0 = time.perf_counter()
             u_r, v_r, bsdf_r = compute_bsdf_psd(
                 height_map=hm,
-                wavelength_um=rep_wl_um,
-                theta_i_deg=rep_theta_i,
+                wavelength_um=wl_std,
+                theta_i_deg=theta_std,
                 phi_i_deg=primary_cond["phi_i_deg"],
                 n1=primary_cond["n1"],
                 n2=primary_cond["n2"],
                 polarization=primary_cond["polarization"],
-                is_btdf=rep_is_btdf,
+                is_btdf=is_btdf_std,
                 approx_mode=approx_mode,
             )
-            method_bsdf_by_cond[rep_key]["psd"] = (u_r, v_r, bsdf_r)
+            method_bsdf_by_cond[std_key]["psd"] = (u_r, v_r, bsdf_r)
             if u_primary is None:
                 u_primary, v_primary, bsdf_primary = u_r, v_r, bsdf_r
             all_dfs.append(build_dataframe(
                 u_r, v_r, bsdf_r, "PSD",
-                rep_theta_i, primary_cond["phi_i_deg"], rep_wl_um,
-                primary_cond["polarization"], is_btdf=rep_is_btdf,
+                theta_std, primary_cond["phi_i_deg"], wl_std,
+                primary_cond["polarization"], is_btdf=is_btdf_std,
             ))
-            logger.info(f"          代表波長 PSD 完了 ({_elapsed(t0)})")
-    else:
-        logger.info(
-            f"代表波長 {rep_wl_um * 1000:.0f}nm は既存の sim 条件に含まれる "
-            f"(θ_i={rep_theta_i:.1f}°, {rep_mode}) — 再利用"
-        )
+            logger.info(f"          PSD 完了 ({_elapsed(t0)})")
 
     # Adding-Doubling 多層合成（主条件のみ）
     if cfg.adding_doubling.get("enabled", False) and bsdf_primary is not None:
@@ -337,10 +345,11 @@ def simulate(
         df_combined = pd.concat(all_dfs, ignore_index=True)
 
         # [4] 光学指標計算
-        # Haze / Gloss / DOI：代表波長 1 条件のみ（規格準拠近似、列固定）
-        # Sparkle：条件ごと（波長依存を保持、サフィックス付き記録）
+        # 新命名規則: <name>_<method>_<deg>_<mode> (単波長) / <name>_<method>_<nm>_<deg>_<mode> (波長依存)
+        # 各指標は規格 (θ_i, mode) に一致する条件でのみ計算される。
+        # compute_at_sim_angles=true のときは sim 全条件で斜入射値も計算する。
         enabled_metrics = [
-            k for k in ("haze", "gloss", "doi", "sparkle")
+            k for k in ("haze", "gloss", "doi_nser", "doi_comb", "doi_astm", "sparkle")
             if cfg.metrics.get(k) is not None and cfg.metrics[k].get("enabled", True)
         ]
         logger.info(
@@ -349,53 +358,47 @@ def simulate(
         t0 = time.perf_counter()
         all_optical_metrics: dict[str, float] = {}
 
-        # --- 規格準拠指標（Haze/Gloss/DOI）：代表波長のみ ---
-        rep_method_data = method_bsdf_by_cond.get(rep_key, {}) if rep_key is not None else {}
-        standards_metrics_cfg = {
-            k: v for k, v in cfg.metrics.items() if k in ("haze", "gloss", "doi")
-        }
-        if standards_metrics_cfg and rep_method_data:
-            for method_key, (u_r, v_r, bsdf_r) in rep_method_data.items():
-                metrics_r = compute_all_optical_metrics(
-                    u_grid=u_r, v_grid=v_r, bsdf=bsdf_r,
-                    config=standards_metrics_cfg, bsdf_floor=cfg.bsdf_floor,
-                )
-                for k, val in metrics_r.items():
-                    # サフィックス無し: haze_fft / gloss_fft / doi_fft
-                    all_optical_metrics[f"{k}_{method_key}"] = val
+        compute_at_sim_angles = bool(cfg.metrics.get("compute_at_sim_angles", False))
 
-        # --- Sparkle：条件ごとに記録 ---
-        sparkle_cfg = cfg.metrics.get("sparkle")
-        if sparkle_cfg is not None and sparkle_cfg.get("enabled", True):
-            sparkle_only_cfg = {"sparkle": sparkle_cfg}
-            for cond_key, method_data in method_bsdf_by_cond.items():
-                wl_um, theta_i, mode = cond_key
-                for method_key, (u_m, v_m, bsdf_m) in method_data.items():
-                    metrics_m = compute_all_optical_metrics(
+        for cond_key, method_data in method_bsdf_by_cond.items():
+            wl_um, theta_i, mode = cond_key
+            wl_nm = int(round(wl_um * 1000))
+            is_rep_wl = abs(wl_um - rep_wl_um) < 1e-6
+            is_std_cond = cond_key in required_standard_conds
+
+            for method_key, (u_m, v_m, bsdf_m) in method_data.items():
+                # 単波長メトリクス (Haze/Gloss/DOI): 代表波長のみ
+                if is_rep_wl and (is_std_cond or compute_at_sim_angles):
+                    metrics_std = compute_all_optical_metrics(
                         u_grid=u_m, v_grid=v_m, bsdf=bsdf_m,
-                        config=sparkle_only_cfg, bsdf_floor=cfg.bsdf_floor,
+                        theta_i_deg=theta_i, mode=mode,
+                        n1=primary_cond["n1"], n2=primary_cond["n2"],
+                        method_name=method_key, wavelength_nm=wl_nm,
+                        config=cfg.metrics, bsdf_floor=cfg.bsdf_floor,
+                        standards_only=True,
+                        allow_oblique=(not is_std_cond),
                     )
-                    for k, val in metrics_m.items():
-                        if multi:
-                            suffix = (
-                                f"_{method_key}"
-                                f"_wl{int(round(wl_um * 1000))}nm"
-                                f"_aoi{int(round(theta_i))}"
-                                f"_{mode.lower()}"
-                            )
-                        else:
-                            suffix = f"_{method_key}"
-                        all_optical_metrics[f"{k}{suffix}"] = val
+                    all_optical_metrics.update(metrics_std)
+
+                # 波長依存メトリクス (Sparkle): 全条件
+                metrics_sp = compute_all_optical_metrics(
+                    u_grid=u_m, v_grid=v_m, bsdf=bsdf_m,
+                    theta_i_deg=theta_i, mode=mode,
+                    n1=primary_cond["n1"], n2=primary_cond["n2"],
+                    method_name=method_key, wavelength_nm=wl_nm,
+                    config=cfg.metrics, bsdf_floor=cfg.bsdf_floor,
+                    sparkle_only=True,
+                )
+                all_optical_metrics.update(metrics_sp)
 
         logger.info(f"      完了 ({_elapsed(t0)})")
-        if not multi:
-            for k, val in all_optical_metrics.items():
-                logger.info(f"        {k} = {val:.6f}")
-        else:
-            # 代表波長指標のみ個別表示
-            for k in sorted(all_optical_metrics):
-                if any(k.startswith(f"{m}_") and "_wl" not in k for m in ("haze", "gloss", "doi")):
-                    logger.info(f"        {k} = {all_optical_metrics[k]:.6f}")
+        # 代表波長のみの単波長メトリクスを個別表示
+        for k in sorted(all_optical_metrics):
+            if any(
+                k.startswith(f"{name}_")
+                for name in ("haze", "gloss", "doi_nser", "doi_comb", "doi_astm")
+            ):
+                logger.info(f"        {k} = {all_optical_metrics[k]:.6f}")
 
         # 実測データとの結合＋Log-RMSE（条件ごと）
         if measured_dfs:
@@ -424,16 +427,11 @@ def simulate(
                 rmse = float(rmse_vals[0])
                 if not np.isnan(rmse):
                     method_key = str(row["method"]).lower()
-                    if multi:
-                        suffix = (
-                            f"_{method_key}"
-                            f"_wl{int(round(row['wavelength_um'] * 1000))}nm"
-                            f"_aoi{int(round(row['theta_i_deg']))}"
-                            f"_{str(row['mode']).lower()}"
-                        )
-                    else:
-                        suffix = f"_{method_key}"
-                    all_optical_metrics[f"log_rmse{suffix}"] = rmse
+                    wl_nm = int(round(row["wavelength_um"] * 1000))
+                    theta_int = int(round(row["theta_i_deg"]))
+                    mode_char = "r" if str(row["mode"]).upper() == "BRDF" else "t"
+                    key = f"log_rmse_{method_key}_{wl_nm}_{theta_int}_{mode_char}"
+                    all_optical_metrics[key] = rmse
             logger.info(
                 f"実測データ結合完了: {len(measured_dfs)} ブロック、"
                 f"log_rmse を {sum(1 for k in all_optical_metrics if k.startswith('log_rmse'))} 条件で計算"
@@ -481,14 +479,13 @@ def simulate(
                 # 2D BSDF PNG（条件 × 手法別）
                 for _cond_key, _method_data in method_bsdf_by_cond.items():
                     _wl_um, _theta_i, _mode = _cond_key
+                    _wl_nm = int(round(_wl_um * 1000))
+                    _theta_int = int(round(_theta_i))
+                    _mode_char = "r" if _mode.upper() == "BRDF" else "t"
                     _cond_tag = (
                         ""
                         if not multi
-                        else (
-                            f"_wl{int(round(_wl_um * 1000))}nm"
-                            f"_aoi{int(round(_theta_i))}"
-                            f"_{_mode.lower()}"
-                        )
+                        else f"_{_wl_nm}_{_theta_int}_{_mode_char}"
                     )
                     for _mkey, (_u, _v, _b) in _method_data.items():
                         _bsdf_png = _td / f"bsdf_2d_{_mkey}{_cond_tag}.png"
@@ -624,29 +621,33 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
 
     # 目的関数の設定（config.yaml の optuna.objectives から読み込む）
     default_objectives = [
-        {"metric": "haze_fft",    "direction": "minimize"},
-        {"metric": "sparkle_fft", "direction": "minimize"},
+        {"metric": "haze_fft_0_t",          "direction": "minimize"},
+        {"metric": "sparkle_fft_555_0_t",   "direction": "minimize"},
     ]
     obj_cfg = optuna_cfg.get("objectives", default_objectives)
     directions = [o["direction"] for o in obj_cfg]
 
     # _ml 指標は optimize 未対応（Adding-Doubling は simulate のみ実装）
-    ml_objectives = [o["metric"] for o in obj_cfg if o["metric"].endswith("_ml")]
+    ml_objectives = [
+        o["metric"] for o in obj_cfg
+        if o["metric"].endswith("_ml") or "_ml_" in o["metric"]
+    ]
     if ml_objectives:
         logger.error(
             f"optimize の objectives に _ml 指標は指定できません: {ml_objectives}\n"
             "  Adding-Doubling（MultiLayer）は bsdf simulate のみ対応。\n"
-            "  代わりに haze_fft / haze_psd などを使用してください。"
+            "  代わりに haze_fft_0_t / haze_psd_0_t などを使用してください。"
         )
         sys.exit(1)
 
-    # 目的関数の指標名から必要な計算手法を自動判定（_fft → FFT、_psd → PSD）
+    # 目的関数の指標名から必要な計算手法を自動判定（_fft_/_psd_/_ml_ をキーに検出）
+    # 新命名規則 <name>_<method>_<deg>_<mode> では method が中央にあるため _{method}_ で判定
     needed_methods: set[str] = set()
     for o in obj_cfg:
-        m = o["metric"]
-        if m.endswith("_fft"):
+        mname = o["metric"]
+        if "_fft_" in mname or mname.endswith("_fft"):
             needed_methods.add("fft")
-        elif m.endswith("_psd"):
+        elif "_psd_" in mname or mname.endswith("_psd"):
             needed_methods.add("psd")
     # 表面形状指標のみ指定された場合は FFT をデフォルトで実行
     if not needed_methods:
@@ -699,6 +700,7 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
                 n2=cfg.n2,
                 is_btdf=cfg.is_btdf,
                 fft_mode=cfg.fft_mode,
+                apply_fresnel=cfg.fft_apply_fresnel,
             )
             method_bsdf["fft"] = (u_f, v_f, bsdf_f)
             all_dfs.append(build_dataframe(
@@ -803,13 +805,13 @@ def _format_table(rows: list[list[str]], headers: list[str]) -> str:
 @click.option("--experiment", "-e", default=None,
               help="実験名（省略時: 01_BSDF_Raw_Data）")
 @click.option("--sort-by", "-s", default=None,
-              help="並び順の基準メトリクス名（例: haze_fft）。省略時は開始時刻降順")
+              help="並び順の基準メトリクス名（例: haze_fft_0_t）。省略時は開始時刻降順")
 @click.option("--ascending/--descending", default=True, show_default=True,
               help="sort-by 指定時の昇順 / 降順")
 @click.option("--limit", "-n", default=20, show_default=True, type=int,
               help="最大表示件数")
 @click.option("--metrics", "-m", default=None,
-              help="カンマ区切りの表示メトリクス名（例: haze_fft,sparkle_fft_wl525nm_aoi0_brdf）")
+              help="カンマ区切りの表示メトリクス名（例: haze_fft_0_t,sparkle_fft_555_0_t）")
 def runs_list(
     tracking_uri: str,
     experiment: str | None,
@@ -821,8 +823,8 @@ def runs_list(
     """MLflow の run 一覧を表示する（visualize の --run-id を選ぶため）。
 
     例:
-      bsdf runs list --sort-by haze_fft --limit 10
-      bsdf runs list -s sparkle_fft -m haze_fft,sparkle_fft --descending
+      bsdf runs list --sort-by haze_fft_0_t --limit 10
+      bsdf runs list -s sparkle_fft_555_0_t -m haze_fft_0_t,sparkle_fft_555_0_t --descending
       bsdf runs list -e 02_Analysis_Reports -n 5
     """
     from ..optimization.mlflow_logger import EXPERIMENT_RAW_DATA, list_runs
@@ -844,7 +846,13 @@ def runs_list(
         metric_cols = [m.strip() for m in metrics.split(",") if m.strip()]
     else:
         # sort_by を先頭に、使われそうな代表メトリクスを自動選択
-        auto_preferred = ["haze_fft", "gloss_fft", "doi_fft", "sparkle_fft"]
+        auto_preferred = [
+            "haze_fft_0_t",
+            "gloss_fft_20_r", "gloss_fft_60_r", "gloss_fft_85_r",
+            "doi_nser_fft_0_t",
+            "doi_comb_fft_0_t", "doi_comb_fft_0_r",
+            "doi_astm_fft_20_r", "doi_astm_fft_30_r",
+        ]
         metric_cols_set: list[str] = []
         if sort_by:
             metric_cols_set.append(sort_by)
@@ -952,8 +960,8 @@ def visualize(
     --run-id は以下を受理:
       - 32 文字の完全な run_id
       - 'latest' / 'latest-2' / 'latest-5' — 最新から N 番目
-      - 'best:haze_fft' — metric の最小値 run
-      - 'best:sparkle_fft:max' — metric の最大値 run
+      - 'best:haze_fft_0_t' — metric の最小値 run
+      - 'best:sparkle_fft_555_0_t:max' — metric の最大値 run
       - 8 文字以上のプレフィックス（例: 'a1b2c3d4'）
 
     `--log-to-mlflow` を指定すると、生成した HTML を元 run の

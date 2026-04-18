@@ -34,6 +34,7 @@ def compute_bsdf_fft(
     polarization: str = "Unpolarized",
     is_btdf: bool = False,
     fft_mode: str = "tilt",
+    apply_fresnel: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """FFT法（スカラー回折理論）でBSDFを計算する。
 
@@ -57,6 +58,12 @@ def compute_bsdf_fft(
             - 'zero'（垂直入射近似）: cos θ_i を 1、sin θ_i を 0 とみなし、入射
               方向依存を無視して 1 回だけ FFT する。θ_i に関わらず specular は
               (u,v)=(0,0) のまま。パターン形状の参考用途や小角度の近似計算に。
+        apply_fresnel: True の場合、θ_i でのフレネル反射/透過率を全 BSDF 値に
+            後掛けする（ヒューリスティック補正）。スカラー近似では失われる
+            絶対値の θ_i 依存性を近似的に取り戻す。正確な θ_i × θ_s 依存性が
+            必要な場合は PSD 法を使うこと。
+            - BRDF: R(θ_i) = (|r_s(θ_i)|² + |r_p(θ_i)|²)/2 （Unpolarized）
+            - BTDF: T(θ_i) = (n2·cos θ_t)/(n1·cos θ_i) · (|t_s|² + |t_p|²)/2
 
     Returns:
         u_grid: 方向余弦 u = sin(theta_s)*cos(phi_s) の2次元グリッド
@@ -162,6 +169,41 @@ def compute_bsdf_fft(
         I_fft / normalization / np.maximum(cos_s, 1e-10) / (wavelength_um**2),
         0.0,
     )
+
+    # ── フレネル係数の後掛け（ヒューリスティック補正）─────────────────────
+    # スカラー近似では失われる絶対値の θ_i 依存性を近似的に取り戻す。
+    # θ_s 依存性は無視されるため、厳密性が必要なら PSD 法を使うこと。
+    if apply_fresnel:
+        from .fresnel import (
+            fresnel_rs,
+            fresnel_rp,
+            fresnel_ts,
+            fresnel_tp,
+            snell_angle,
+        )
+
+        rs = abs(complex(fresnel_rs(theta_i_deg, n1, n2))) ** 2
+        rp = abs(complex(fresnel_rp(theta_i_deg, n1, n2))) ** 2
+        if is_btdf:
+            theta_t_deg = snell_angle(theta_i_deg, n1, n2)
+            cos_t_i = np.cos(np.deg2rad(theta_t_deg))
+            energy_coef = (n2 * cos_t_i) / (n1 * max(cos_i, 1e-10))
+            ts = abs(complex(fresnel_ts(theta_i_deg, n1, n2))) ** 2
+            tp = abs(complex(fresnel_tp(theta_i_deg, n1, n2))) ** 2
+            if polarization == "S":
+                fresnel_factor = energy_coef * ts
+            elif polarization == "P":
+                fresnel_factor = energy_coef * tp
+            else:
+                fresnel_factor = energy_coef * 0.5 * (ts + tp)
+        else:
+            if polarization == "S":
+                fresnel_factor = rs
+            elif polarization == "P":
+                fresnel_factor = rp
+            else:
+                fresnel_factor = 0.5 * (rs + rp)
+        bsdf = bsdf * fresnel_factor
 
     # 広角散乱の警告チェック
     theta_s_max = float(np.rad2deg(np.arcsin(np.clip(np.sqrt(uv_r2[valid_mask].max()), 0, 1))))

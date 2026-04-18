@@ -189,7 +189,7 @@ def _format_surface_metrics_md(hm: HeightMap) -> str:
             f"- Ssk = {m['ssk']:.3f}\n"
             f"- Sku = {m['sku']:.3f}\n"
             f"- Sdq = {m['sdq_rad']:.4f} rad\n"
-            f"- Sdr = {m['sdr_pct']:.4f} %\n"
+            f"- Sdr = {m['sdr'] * 100:.4f} %\n"
         )
     except Exception as e:
         return f"指標計算中...（{e}）"
@@ -219,6 +219,7 @@ class _BaseBSDFDashboard(ABC):
         measured_tolerance_deg: float = 1.0,
         measured_tolerance_nm: float = 5.0,
         fft_mode: str = "tilt",
+        fft_apply_fresnel: bool = False,
     ) -> None:
         _check_holoviews()
         self.wavelength_um = wavelength_um
@@ -233,6 +234,7 @@ class _BaseBSDFDashboard(ABC):
         self.measured_tolerance_deg = measured_tolerance_deg
         self.measured_tolerance_nm = measured_tolerance_nm
         self.fft_mode = fft_mode
+        self.fft_apply_fresnel = fft_apply_fresnel
 
         # 条件に一致する実測ブロックを事前抽出
         self._matched_meas_df: pd.DataFrame | None = None
@@ -268,6 +270,7 @@ class _BaseBSDFDashboard(ABC):
             n1=self.n1, n2=self.n2,
             is_btdf=self.is_btdf,
             fft_mode=self.fft_mode,
+            apply_fresnel=self.fft_apply_fresnel,
         )
 
     def _measured_profile(self) -> tuple[np.ndarray, np.ndarray] | None:
@@ -365,6 +368,7 @@ def _compute_bsdf_random_rough(
     is_btdf: bool,
     seed: int,
     fft_mode: str = "tilt",
+    apply_fresnel: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """キャッシュなし BSDF 計算（RandomRoughSurface、内部用）。"""
     model = RandomRoughSurface(
@@ -376,6 +380,7 @@ def _compute_bsdf_random_rough(
         height_map=hm, wavelength_um=wavelength_um,
         theta_i_deg=theta_i_deg, phi_i_deg=phi_i_deg,
         n1=n1, n2=n2, is_btdf=is_btdf, fft_mode=fft_mode,
+        apply_fresnel=apply_fresnel,
     )
 
 
@@ -395,6 +400,7 @@ def _compute_bsdf_spherical(
     is_btdf: bool,
     seed: int,
     fft_mode: str = "tilt",
+    apply_fresnel: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """キャッシュなし BSDF 計算（SphericalArraySurface、内部用）。"""
     model = SphericalArraySurface(
@@ -408,6 +414,7 @@ def _compute_bsdf_spherical(
         height_map=hm, wavelength_um=wavelength_um,
         theta_i_deg=theta_i_deg, phi_i_deg=phi_i_deg,
         n1=n1, n2=n2, is_btdf=is_btdf, fft_mode=fft_mode,
+        apply_fresnel=apply_fresnel,
     )
 
 
@@ -457,6 +464,7 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             is_btdf=self.is_btdf,
             seed=self.random_seed,
             fft_mode=self.fft_mode,
+            apply_fresnel=self.fft_apply_fresnel,
         )
 
     def create_dashboard(
@@ -597,6 +605,7 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             is_btdf=self.is_btdf,
             seed=self.random_seed,
             fft_mode=self.fft_mode,
+            apply_fresnel=self.fft_apply_fresnel,
         )
 
     def create_dashboard(
@@ -821,6 +830,7 @@ def create_dashboard_from_config(
         pixel_size_um=float(surface_cfg.get("pixel_size_um", 0.25)),
         preview_grid_size_idle=preview_grid_size_idle,
         fft_mode=cfg.fft_mode,
+        fft_apply_fresnel=cfg.fft_apply_fresnel,
     )
 
     # 実測 BSDF ファイルの読み込み
