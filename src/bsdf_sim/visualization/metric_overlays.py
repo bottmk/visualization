@@ -231,62 +231,148 @@ def overlay_doi_comb_2d(
     comb_widths_mm: list[float] | None = None,
     distance_mm: float = 280.0,
     show_stripes: bool = True,
+    show_imin_phase: bool = False,
     stripe_alpha: float = 0.25,
-    style_band: dict[str, Any] | None = None,
+    style_window: dict[str, Any] | None = None,
 ) -> Any:
-    """DOI-COMB（JIS K 7374 光学くし）の走査帯とくし縞を重ねる。
+    """DOI-COMB（JIS K 7374 光学くし）のビーム窓とくし縞を重ねる。
 
-    JIS K 7374 は 5 種類のくし幅 [0.125, 0.25, 0.5, 1.0, 2.0] mm で
-    くしを走査し、各幅ごとの明・暗信号の Imax/Imin からコントラストを求め
-    5 値を算術平均する。可視化ではくし幅ごとに明スリットを長方形群として
-    重ね、凡例クリックで各幅を個別表示できるようにする。
+    規格の動作: 試料からの透過ビームを距離 `distance_mm` [mm] 先の光学くし
+    （明/暗 duty 50%、周期 2d）に通し、くしを**横に 1 周期だけ**ずらしながら
+    受光強度を読み Imax/Imin を記録する。コントラスト M = (Imax-Imin)/(Imax+Imin)
+    を 5 幅 [0.125, 0.25, 0.5, 1.0, 2.0] mm で計算し算術平均する。
+
+    可視化の意味:
+    - `scan_half_angle_deg`（±4°）と `v_band_half_deg`（±0.2°）で囲まれる
+      長方形は「ビームが占める角度範囲（受光窓）」であり、くしの移動幅では無い。
+    - くしの横移動は周期 period_u = 2·d/distance [rad] の 1 周期分だけで、
+      0° 近傍の小さな範囲。Imax/Imin の 2 位相を重ね表示するとくしが実際に
+      横にずれる様子が分かる（`show_imin_phase=True`）。
+    - 各くし幅で「ビーム窓に入るスリット数 ≈ 2·u_half / period_u」が決まる。
+      細いくしほどスリット数が多く、太いくしほど少ない。
 
     Args:
         heatmap: 既存の hv.Image / Overlay
-        u_center, v_center: 走査中心（通常 specular u_c, v=0）
-        scan_half_angle_deg: 走査範囲の半角 [deg]（u 走査幅）
-        v_band_half_deg: P(θ) 抽出時の v 軸バンド半角 [deg]
+        u_center, v_center: specular 方向（透過ビーム像中心）
+        scan_half_angle_deg: **ビーム窓**の u 方向半角 [deg]（くしの移動幅では無い）
+        v_band_half_deg: ビーム窓の v 方向半角 [deg]
         comb_widths_mm: くし幅リスト [mm]（None で JIS 標準 5 値）
         distance_mm: 試料〜くし距離 [mm]
-        show_stripes: 各くし幅の明スリットを長方形群として描画するか
+        show_stripes: 各くし幅の **Imax 位相**（明スリット中心 = u_center）を描画
+        show_imin_phase: True で **Imin 位相**（半周期ずらした明スリット）も重ねる
         stripe_alpha: 明スリット塗りつぶしの不透明度（0〜1）
-        style_band: 走査帯スタイルの上書き
+        style_window: ビーム窓の外枠スタイル上書き
 
     Returns:
-        heatmap に COMB 走査帯 + 各くし幅の縞を重ねた Overlay
-        （くし幅 1 種類ごとに 1 レイヤー → 凡例クリックで個別切替可能）
+        heatmap にビーム窓 + 各くし幅の縞を重ねた Overlay
+        （くし幅 × 位相 1 組ごとに 1 レイヤー → 凡例クリックで個別切替可能）
     """
     _check_hv()
-    s_band = dict(_DEFAULT_STYLES["doi_comb_band"])
-    if style_band:
-        s_band.update(style_band)
+    s_window = dict(_DEFAULT_STYLES["doi_comb_band"])
+    if style_window:
+        s_window.update(style_window)
 
     u_half = float(np.sin(np.deg2rad(scan_half_angle_deg)))
     v_half = float(np.sin(np.deg2rad(v_band_half_deg)))
-    # 走査帯 (v バンド × u 走査幅) の外枠
-    band = _rectangle(u_center, v_center, u_half, v_half, **s_band).relabel(
-        f"DOI-COMB band ±{scan_half_angle_deg}°×{v_band_half_deg}°"
+    # ビーム窓 (v 帯 × u 窓幅) の外枠
+    window = _rectangle(u_center, v_center, u_half, v_half, **s_window).relabel(
+        f"COMB beam window ±{scan_half_angle_deg}°×{v_band_half_deg}°"
     )
-    result = heatmap * band
+    result = heatmap * window
 
     if show_stripes:
         widths = comb_widths_mm or [0.125, 0.25, 0.5, 1.0, 2.0]
         for d_mm in widths:
             period_u = 2.0 * float(d_mm) / float(distance_mm)
-            rects = _comb_bright_rects_u(u_center, u_half, period_u)
-            if not rects:
-                continue
-            rect_tuples = [
-                (x0, v_center - v_half, x1, v_center + v_half) for x0, x1 in rects
-            ]
             color = _COMB_WIDTH_COLORS.get(float(d_mm), _COMB_WIDTH_DEFAULT_COLOR)
             period_deg = float(np.rad2deg(period_u))
-            stripes = hv.Rectangles(rect_tuples).opts(
-                fill_alpha=stripe_alpha, fill_color=color,
-                line_alpha=0.8, line_color=color, line_width=1,
-            ).relabel(f"COMB d={d_mm}mm (period {period_deg:.3f}°)")
-            result = result * stripes
+            n_slits_in_window = int(round(2.0 * u_half / period_u))
 
+            # Imax 位相: 明スリット中心 = u_center
+            rects_max = _comb_bright_rects_u(u_center, u_half, period_u)
+            if rects_max:
+                rt = [(x0, v_center - v_half, x1, v_center + v_half)
+                      for x0, x1 in rects_max]
+                stripes = hv.Rectangles(rt).opts(
+                    fill_alpha=stripe_alpha, fill_color=color,
+                    line_alpha=0.8, line_color=color, line_width=1,
+                ).relabel(
+                    f"COMB d={d_mm}mm Imax phase "
+                    f"(period {period_deg:.3f}°, ~{n_slits_in_window} slits)"
+                )
+                result = result * stripes
+
+            # Imin 位相: くしを半周期ずらした明スリット
+            if show_imin_phase:
+                rects_min = _comb_bright_rects_u(
+                    u_center + period_u / 2.0, u_half, period_u,
+                )
+                if rects_min:
+                    rt = [(x0, v_center - v_half, x1, v_center + v_half)
+                          for x0, x1 in rects_min]
+                    stripes_min = hv.Rectangles(rt).opts(
+                        fill_alpha=stripe_alpha * 0.6, fill_color=color,
+                        line_alpha=0.6, line_color=color, line_width=1,
+                        line_dash="dashed",
+                    ).relabel(f"COMB d={d_mm}mm Imin phase")
+                    result = result * stripes_min
+
+    return result
+
+
+def overlay_doi_comb_1d(
+    curve_overlay: Any,
+    theta_axis_deg: float = 0.0,
+    scan_half_angle_deg: float = 4.0,
+    comb_widths_mm: list[float] | None = None,
+    distance_mm: float = 280.0,
+    stripe_alpha: float = 0.2,
+) -> Any:
+    """1D BSDF 角度プロファイル（θ_s vs BSDF）に COMB の明スリット帯を重ねる。
+
+    θ_s を横軸としたプロットに、各くし幅で Imax 位相（明スリット中心 = θ_axis_deg）
+    の明スリット範囲を半透明の縦帯として描画する。y 範囲は親プロットの
+    `RangesXY` ストリームに従って自動で上下に広がる（hv.VSpan 的な挙動を
+    Rectangles で実装）。
+
+    Args:
+        curve_overlay: 既存の hv.Overlay（plot_bsdf_1d_overlay の戻り値）
+        theta_axis_deg: くしが揃う中心の θ_s [deg]（通常 0、BRDF なら θ_i）
+        scan_half_angle_deg: ビーム窓の半角 [deg]
+        comb_widths_mm: くし幅リスト [mm]（None で JIS 標準 5 値）
+        distance_mm: 試料〜くし距離 [mm]
+        stripe_alpha: 塗りつぶしの不透明度
+
+    Returns:
+        curve_overlay にくし縞を重ねた Overlay（凡例クリックで切替可能）
+    """
+    _check_hv()
+    widths = comb_widths_mm or [0.125, 0.25, 0.5, 1.0, 2.0]
+    result = curve_overlay
+    for d_mm in widths:
+        period_rad = 2.0 * float(d_mm) / float(distance_mm)
+        period_deg = float(np.rad2deg(period_rad))
+        # scan_half_angle_deg の窓内で Imax 位相の明区間を列挙（角度 deg 空間で直接）
+        half_deg = scan_half_angle_deg
+        k_max = int(np.ceil(half_deg / period_deg)) + 1
+        bright_half_deg = period_deg / 4.0
+        spans: list[tuple[float, float]] = []
+        for k in range(-k_max, k_max + 1):
+            cx = theta_axis_deg + k * period_deg
+            x0 = max(cx - bright_half_deg, theta_axis_deg - half_deg)
+            x1 = min(cx + bright_half_deg, theta_axis_deg + half_deg)
+            if x1 > x0:
+                spans.append((x0, x1))
+        if not spans:
+            continue
+        # VSpans が無い環境でも動くよう Rectangles を y=[-1e30, 1e30] で代用
+        rect_tuples = [(x0, -1e30, x1, 1e30) for x0, x1 in spans]
+        color = _COMB_WIDTH_COLORS.get(float(d_mm), _COMB_WIDTH_DEFAULT_COLOR)
+        stripes = hv.Rectangles(rect_tuples).opts(
+            fill_alpha=stripe_alpha, fill_color=color,
+            line_alpha=0.0,
+        ).relabel(f"COMB d={d_mm}mm (period {period_deg:.3f}°)")
+        result = result * stripes
     return result
 
 

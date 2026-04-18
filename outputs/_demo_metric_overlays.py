@@ -26,6 +26,7 @@ from bsdf_sim.visualization.metric_overlays import overlay_all_metrics_2d
 OUT_HTML = Path(__file__).parent / "demo_metric_overlays.html"
 OUT_PNG = Path(__file__).parent / "demo_metric_overlays.png"
 OUT_PNG_ZOOM = Path(__file__).parent / "demo_metric_overlays_zoom.png"
+OUT_PNG_1D = Path(__file__).parent / "demo_metric_overlays_1d.png"
 
 
 def _make_dummy_bsdf(n: int = 257) -> hv.Image:
@@ -92,6 +93,70 @@ def main() -> None:
     print(f"saved: {OUT_PNG}")
     _save_png_matplotlib(data, cfg, OUT_PNG_ZOOM, xlim=(-0.1, 0.1), ylim=(-0.1, 0.1))
     print(f"saved: {OUT_PNG_ZOOM}")
+    _save_png_1d(u, data, cfg, OUT_PNG_1D)
+    print(f"saved: {OUT_PNG_1D}")
+
+
+def _save_png_1d(u: np.ndarray, data_log10: np.ndarray, cfg: dict, path: Path) -> None:
+    """1D BSDF プロファイル（θ_s vs BSDF）に COMB くし縞を重ねた PNG を出力。"""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    # v 中心帯（v≈0 のスライス）で 1D プロファイルを抽出
+    n = data_log10.shape[1]
+    v_mid = n // 2
+    profile_log10 = data_log10[:, v_mid]
+    bsdf = 10 ** profile_log10
+    # θ_s [deg] 軸（u = sin θ、ただし符号付き。|u|≤1 のみ）
+    valid = np.abs(u) <= 1.0
+    theta_s = np.rad2deg(np.arcsin(np.clip(u[valid], -1.0, 1.0)))
+    y = bsdf[valid]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.semilogy(theta_s, np.maximum(y, 1e-6), color="#1976d2", linewidth=1.5, label="BSDF")
+    ax.set_xlabel("Scattering angle theta_s [deg]")
+    ax.set_ylabel("BSDF [1/sr]")
+    ax.set_xlim(-5, 5)
+    ax.set_ylim(1e-3, 1e4)
+
+    # COMB くし縞（各くし幅で Imax 位相）
+    comb = cfg["doi_comb"]
+    half_deg = comb["scan_half_angle_deg"]
+    comb_colors = {
+        0.125: "#ffcc80", 0.25: "#ffb347", 0.5: "#ff8c42",
+        1.0: "#ff5722", 2.0: "#bf360c",
+    }
+    for d_mm in comb["comb_widths_mm"]:
+        period_deg = np.rad2deg(2.0 * d_mm / comb["distance_mm"])
+        bright_half = period_deg / 4.0
+        color = comb_colors.get(float(d_mm), "#ffb347")
+        k_max = int(np.ceil(half_deg / period_deg)) + 1
+        first_label = f"COMB d={d_mm}mm (period {period_deg:.3f} deg)"
+        for k in range(-k_max, k_max + 1):
+            cx = k * period_deg
+            x0 = max(cx - bright_half, -half_deg)
+            x1 = min(cx + bright_half, half_deg)
+            if x1 <= x0:
+                continue
+            ax.axvspan(
+                x0, x1, facecolor=color, alpha=0.2,
+                label=first_label if first_label else None,
+            )
+            first_label = ""
+
+    # ビーム窓境界
+    ax.axvline(-half_deg, color="gray", linestyle=":", linewidth=1, alpha=0.5)
+    ax.axvline(+half_deg, color="gray", linestyle=":", linewidth=1, alpha=0.5,
+               label=f"beam window +/-{half_deg} deg")
+    ax.set_title(
+        "1D BSDF profile + DOI-COMB bright slits at Imax phase (per comb width)"
+    )
+    ax.legend(loc="upper right", fontsize=7, framealpha=0.85)
+    ax.grid(True, which="both", alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(path, dpi=120)
+    plt.close(fig)
 
 
 def _save_png_matplotlib(

@@ -101,13 +101,13 @@ class TestOverlayDOIComb2D:
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
         result = overlay_doi_comb_2d(bsdf_heatmap)
         assert isinstance(result, hv.Overlay)
-        # Image + band + 5 幅分の縞レイヤー = 7
+        # Image + beam window + 5 幅分 Imax 縞 = 7
         assert len(list(result)) == 7
 
     def test_no_stripes(self, bsdf_heatmap):
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
         result = overlay_doi_comb_2d(bsdf_heatmap, show_stripes=False)
-        # Image + band のみ
+        # Image + beam window のみ
         assert len(list(result)) == 2
 
     def test_custom_widths(self, bsdf_heatmap):
@@ -115,7 +115,16 @@ class TestOverlayDOIComb2D:
         result = overlay_doi_comb_2d(
             bsdf_heatmap, comb_widths_mm=[0.5, 1.0], distance_mm=280.0,
         )
-        # Image + band + 2 幅 = 4
+        # Image + beam window + 2 幅 = 4
+        assert len(list(result)) == 4
+
+    def test_imin_phase(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
+        result = overlay_doi_comb_2d(
+            bsdf_heatmap, comb_widths_mm=[1.0], distance_mm=280.0,
+            show_stripes=True, show_imin_phase=True,
+        )
+        # Image + window + Imax + Imin = 4
         assert len(list(result)) == 4
 
 
@@ -347,6 +356,35 @@ class TestOverlayGeometry:
         interior_diffs = diffs[1:-1] if len(diffs) > 2 else diffs
         assert np.allclose(interior_diffs, period_u, atol=1e-9)
 
+    def test_comb_imin_phase_offset(self, bsdf_heatmap):
+        """Imin 位相 = Imax 位相から half period ずれた位置に明スリット中心がある。"""
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
+        u_half = float(np.sin(np.deg2rad(4.0)))
+        period_u = 2.0 * 1.0 / 280.0
+        result = overlay_doi_comb_2d(
+            bsdf_heatmap, u_center=0.0, scan_half_angle_deg=4.0,
+            comb_widths_mm=[1.0], distance_mm=280.0,
+            show_stripes=True, show_imin_phase=True,
+        )
+        rects = _rectangles(result)
+        # [window, Imax, Imin]
+        assert len(rects) == 3
+        # 端のクリップを避けるため、|center| < u_half - period_u の内部スリットのみ比較
+        interior_bound = u_half - period_u
+        imax_centers = sorted(
+            c for _, row in rects[1].data.iterrows()
+            if abs((c := (row["x0"] + row["x1"]) / 2)) < interior_bound
+        )
+        imin_centers = sorted(
+            c for _, row in rects[2].data.iterrows()
+            if abs((c := (row["x0"] + row["x1"]) / 2)) < interior_bound
+        )
+        # いずれの Imin 中心も最寄りの Imax 中心から period/2 ずれている
+        half = period_u / 2.0
+        for c_min in imin_centers:
+            nearest_max = min(imax_centers, key=lambda c: abs(c - c_min))
+            assert abs(abs(c_min - nearest_max) - half) < 1e-9
+
     def test_comb_stripe_duty_50pct(self, bsdf_heatmap):
         """明スリット幅 = period/2（duty 50%）。"""
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
@@ -394,6 +432,36 @@ class TestOverlayGeometry:
         for e in els:
             assert e.x == pytest.approx(u_expected, abs=1e-9)
             assert e.y == pytest.approx(0.0)
+
+
+class TestOverlayDOIComb1D:
+    def test_stripes_added(self):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_1d
+        curve = hv.Curve([(0, 1), (1, 0.5), (2, 0.1)], kdims=["θ_s"], vdims=["BSDF"])
+        result = overlay_doi_comb_1d(
+            curve, theta_axis_deg=0.0, scan_half_angle_deg=4.0,
+            comb_widths_mm=[0.125, 0.25, 0.5, 1.0, 2.0],
+        )
+        # curve + 5 幅 = 6 要素
+        assert len(list(result)) == 6
+
+    def test_stripe_period_in_deg(self):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_1d
+        curve = hv.Curve([(0, 1)], kdims=["θ_s"], vdims=["BSDF"])
+        result = overlay_doi_comb_1d(
+            curve, theta_axis_deg=0.0, scan_half_angle_deg=4.0,
+            comb_widths_mm=[1.0], distance_mm=280.0,
+        )
+        rects = _rectangles(result)
+        assert len(rects) == 1
+        period_deg = float(np.rad2deg(2.0 * 1.0 / 280.0))
+        centers = sorted(
+            [(row["x0"] + row["x1"]) / 2 for _, row in rects[0].data.iterrows()]
+        )
+        diffs = np.diff(centers)
+        # 内部の周期が period_deg と一致
+        interior = diffs[1:-1] if len(diffs) > 2 else diffs
+        assert np.allclose(interior, period_deg, atol=1e-9)
 
 
 class TestHazeBoundaryIn1DOverlay:

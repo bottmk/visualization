@@ -10,6 +10,7 @@ from .holoviews_plots import (
 from .metric_overlays import (
     overlay_all_metrics_2d,
     overlay_doi_astm_2d,
+    overlay_doi_comb_1d,
     overlay_doi_comb_2d,
     overlay_doi_nser_2d,
     overlay_from_config,
@@ -27,6 +28,7 @@ __all__ = [
     "overlay_gloss_2d",
     "overlay_doi_nser_2d",
     "overlay_doi_comb_2d",
+    "overlay_doi_comb_1d",
     "overlay_doi_astm_2d",
     "overlay_all_metrics_2d",
     "overlay_from_config",
