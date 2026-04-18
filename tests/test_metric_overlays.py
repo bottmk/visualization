@@ -434,6 +434,61 @@ class TestOverlayGeometry:
             assert e.y == pytest.approx(0.0)
 
 
+class TestPlotBsdf2DHeatmapWithOverlay:
+    """plot_bsdf_2d_heatmap の metrics_config / metric_overlay_config 引数の統合テスト。"""
+
+    def _uv_bsdf(self, n=33):
+        u_axis = np.linspace(-1.0, 1.0, n)
+        v_axis = np.linspace(-1.0, 1.0, n)
+        U, V = np.meshgrid(u_axis, v_axis, indexing="ij")
+        bsdf = np.exp(-(U**2 + V**2) / 0.1)
+        return U, V, bsdf
+
+    def test_no_overlay_when_configs_absent(self):
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(U, V, bsdf)
+        # Image + 半球境界円 = 2 のまま（overlay 追加なし）
+        assert len(list(result)) == 2
+
+    def test_overlay_applied_when_show_true(self):
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(
+            U, V, bsdf,
+            metrics_config={"haze": {"enabled": True}},
+            metric_overlay_config={"show_overlay": True, "click_policy": "hide"},
+        )
+        # 2 (base) + Haze (1) = 3
+        assert len(list(result)) == 3
+
+    def test_overlay_disabled_when_show_false(self):
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(
+            U, V, bsdf,
+            metrics_config={"haze": {"enabled": True}},
+            metric_overlay_config={"show_overlay": False},
+        )
+        # overlay が効かず 2 要素のまま
+        assert len(list(result)) == 2
+
+    def test_theta_i_shifts_haze_center(self):
+        """BRDF θ_i=30° のとき Haze 中心が sin(30°) に移動する。"""
+        from bsdf_sim.visualization.holoviews_plots import plot_bsdf_2d_heatmap
+        U, V, bsdf = self._uv_bsdf()
+        result = plot_bsdf_2d_heatmap(
+            U, V, bsdf,
+            metrics_config={"haze": {"enabled": True}},
+            metric_overlay_config={"show_overlay": True},
+            theta_i_deg=30.0, mode="BRDF",
+        )
+        ellipses = [item for item in result if isinstance(item, hv.Ellipse)]
+        # Haze 円の中心が sin(30°) ≈ 0.5 に移動
+        assert len(ellipses) == 1
+        assert ellipses[0].x == pytest.approx(float(np.sin(np.deg2rad(30.0))))
+
+
 class TestOverlayDOIComb1D:
     def test_stripes_added(self):
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_1d

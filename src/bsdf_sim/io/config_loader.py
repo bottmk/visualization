@@ -409,6 +409,20 @@ class BSDFConfig:
             )
         return unit
 
+    @property
+    def metric_overlay(self) -> dict[str, Any]:
+        """BSDF 2D ヒートマップへの光学指標オーバーレイ設定。
+
+        config.visualization.metric_overlay セクション:
+            show_overlay (bool): 全体 on/off（既定 True）
+            initially_shown (list[str] | None): 初期表示するキー（None で全表示）
+                使えるキー: 'haze' / 'gloss_20' / 'gloss_60' / 'gloss_85' /
+                            'doi_nser' / 'doi_comb' / 'doi_astm'
+            click_policy (str): 'hide' / 'mute' / 'none'（既定 'hide'）
+            legend_position (str): 'right' / 'top_right' / 'bottom' 等（既定 'right'）
+        """
+        return self.visualization.get("metric_overlay") or {}
+
     # ── 代表波長（規格準拠の Haze/Gloss/DOI 計算用）────────────────────────
 
     @property

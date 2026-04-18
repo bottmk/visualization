@@ -319,7 +319,13 @@ adding_doubling:
 
 ### 5.2. 評価アルゴリズム詳細：ギラツキ（Sparkle）
 
-ギラツキコントラスト $C_s = \sigma / \mu$（輝度の標準偏差 / 平均）を以下の設定で算出する。
+**$C_s$（ギラツキコントラスト）の定義**:
+
+$$C_s = \sigma(\{L_k\}) / \mu(\{L_k\}) \quad \text{（無次元）}$$
+
+$L_k$ はディスプレイ画素 $k$ の観察輝度、$\sigma/\mu$ は全画素での標準偏差 / 平均。値が大きいほどギラつきが強い。実測典型値は 0.01–0.15（無次元）、知覚閾値は $C_s \lesssim 0.02$（Kelley 2014）。詳細は `docs/sparkle_calculation.md` 参照。
+
+以下の設定で算出する。
 
 ```yaml
 sparkle:
@@ -1172,6 +1178,8 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 
 | 日付 | 変更内容 | 対応コミット |
 |---|---|---|
+| 2026-04-18 | **BSDF 指標オーバーレイを simulate/visualize/dashboard に統合**（機能追加、後方互換）: Phase 1〜3 で実装した `overlay_all_metrics_2d` を CLI 3 経路から利用可能に。(A) `plot_bsdf_2d_heatmap` / `_build_condition_panel` / `plot_bsdf_report` に `metrics_config` / `metric_overlay_config` / `theta_i_deg` / `mode` / `n1` / `n2` 引数を伝播。`metric_overlay_config.show_overlay=True` かつ `metrics_config` 提供時のみ overlay 適用（両方が None の場合は従来通り素の heatmap）。(B) `BSDFConfig.metric_overlay` プロパティを追加し `config.visualization.metric_overlay` 辞書を読み込む。(C) `bsdf simulate` が `cfg._raw["metrics"]` と `cfg.metric_overlay` を `plot_bsdf_report` に渡すよう修正、`bsdf_report.html` に overlay が自動反映。(D) `bsdf visualize` に `--config`/`-c` と `--show-metric-overlay/--no-show-metric-overlay` CLI オプションを追加（config 未指定時は overlay 無効、CLI フラグで `show_overlay` を上書き可能）。(E) `_BaseBSDFDashboard.__init__` に `metrics_config`/`metric_overlay_config` を追加、`_make_2d_heatmap_with_overlay` ヘルパ経由で全 3 dashboard（RandomRough/Spherical/Measured）の `update_plot` が `pn.Row(plot_1d, plot_2d)` を返すよう変更。`create_dashboard_from_config` が config から自動伝播。テスト 407→415 件（`TestPlotBsdf2DHeatmapWithOverlay` 4 件等追加） | 本コミット |
+| 2026-04-18 | **Sparkle 拡張レベル L3'/L4/L5 実装追加**（機能追加、後方互換）: `src/bsdf_sim/metrics/sparkle_extended.py` を新設し、`docs/sparkle_approximation_levels.md` に定義した拡張レベルを実装。(A) `compute_sparkle_l3prime(height_map, color, config, ...)` — 単色表示（サブピクセル限定発光 + 単波長）、(B) `compute_sparkle_l4(height_map, config, ...)` — 白点灯（R/G/B サブピクセル + V(λ) 重み、narrowband 近似）、(C) `compute_sparkle_l5(height_map, color, config, window_size_factor=3.0, ...)` — 空間分解 BSDF（Hann 窓付き FFT、画素ごとに局所 BSDF を計算）。HeightMap 入力・μm 単位統一。L1 `compute_sparkle` は BSDF 入力のまま温存（後方互換）。CIE 1931 V(λ) テーブルと色別代表波長（R=630/G=525/B=465 nm）を同モジュール内に実装。L5 は DC 集中・サブピクセル Moiré アーティファクトを回避するため物理的に妥当な Cs 値を返すが、L3'/L4 は角度ビニング手法の性質上 DC 近傍集中による高 Cs となり**相対比較用途**（規格値の代替ではない）である点を docstring に明記。CLI/simulate パイプライン統合は未実装（将来拡張）。テスト 407→432 件（TestSubpixelMask/TestVLambda/TestCsFromLuminance/TestSparkleL3Prime/TestSparkleL4/TestSparkleL5 計 25 件追加） | 本コミット |
 | 2026-04-18 | **DOI-COMB overlay の意味論修正 + 1D overlay 追加**: (1) 外枠長方形のラベルを「scan band」→「beam window」に変更し、docstring を全面改訂して「`scan_half_angle_deg` はビーム像の角度範囲（受光窓）、くし本体の移動は周期 period_u=2·d/distance [rad] の 1 周期分だけ」と明記。誤解を招く「走査範囲」表現を排除。(2) `show_imin_phase=True` で Imax 位相（明中心=u_center）に加え Imin 位相（半周期ずらし、破線）も重ね表示可能に。(3) 縞ラベルに「ビーム窓に入るスリット数 ~2·u_half/period_u」を併記（幅が細いほど多く、太いほど少ない）。(4) 新関数 `overlay_doi_comb_1d(curve_overlay, theta_axis_deg, ...)` を追加、1D BSDF 角度プロファイル（θ_s vs BSDF）にくし縞を縦帯として重ねる。`outputs/_demo_metric_overlays.py` に 1D 出力 `demo_metric_overlays_1d.png` を追加。テスト 383→394 件 | 本コミット |
 | 2026-04-18 | **副軸ユニットを config.yaml / CLI 対応**（機能拡張、既定値変更なし）: (A) `BSDFConfig.secondary_x_unit` プロパティを追加し、`config.visualization.secondary_x_unit` を `'lambda_scale'`（既定）/ `'u'` / `'f'` / `'k_x'` / `'theta_s'` から選択可能に。不正値は `ValueError`。(B) CLI `bsdf simulate` と `bsdf visualize` に `--secondary-x-unit` オプションを追加（`simulate` は None 既定で config を尊重、`visualize` は直接選択）。simulate の `bsdf_report.html` 生成と visualize の HTML 出力の両方で反映。(C) `_BaseBSDFDashboard.__init__` に `secondary_x_unit_default` 引数を追加、`create_dashboard_from_config` が `cfg.secondary_x_unit` を渡すことで dashboard の Select ウィジェット初期値に config が反映される。テスト 398→407 件（+9、TestSecondaryXUnit 7 件 + 関連整理） | 本コミット |
 | 2026-04-18 | **DOI-COMB overlay をくし縞（5 幅分）に拡張**（API 変更あり）: JIS K 7374 は 5 種類のくし幅 [0.125, 0.25, 0.5, 1.0, 2.0] mm で各くしの明暗信号から Imax/Imin コントラストを算出する仕組みなので、`overlay_doi_comb_2d` を「走査帯 + 最小くし幅の pitch バー数本」から「走査帯 + 各くし幅の明スリット群（duty 50%、period_u=2·d/distance）」に差し替え。くし幅 1 種類ごとに 1 レイヤー（凡例クリックで個別切替可能）、5 色グラデーション（0.125mm=淡オレンジ →2.0mm=濃赤）。API 変更: `show_pitch_bars`/`style_scan`/`style_pitch` 廃止、`show_stripes=True`/`stripe_alpha=0.25` 追加。`_apply_visibility` を COMB 縞レイヤー（"COMB d=..."）にも対応。`_comb_bright_rects_u` ヘルパを追加。`outputs/_demo_metric_overlays.py` の matplotlib fallback も 5 幅縞描画に更新。テスト 381→383 件（pitch テスト 1 件を削除、stripe 関連 3 件を追加） | 本コミット |

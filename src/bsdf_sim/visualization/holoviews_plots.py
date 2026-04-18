@@ -194,6 +194,12 @@ def plot_bsdf_2d_heatmap(
     bsdf: np.ndarray,
     title: str = "BSDF 2D ヒートマップ",
     log_scale: bool = True,
+    metrics_config: dict[str, Any] | None = None,
+    metric_overlay_config: dict[str, Any] | None = None,
+    theta_i_deg: float = 0.0,
+    mode: str = "BTDF",
+    n1: float = 1.0,
+    n2: float = 1.5,
 ) -> Any:
     """BSDF の2次元UV空間ヒートマップを生成する。
 
@@ -203,9 +209,15 @@ def plot_bsdf_2d_heatmap(
         bsdf: BSDF 値 [sr⁻¹]（2D）
         title: プロットタイトル
         log_scale: True の場合 log10 スケールで表示
+        metrics_config: config.metrics セクション辞書。与えられ、かつ
+            `metric_overlay_config.show_overlay` が True のときに Haze/Gloss/
+            DOI 指標のオーバーレイを重ねる。
+        metric_overlay_config: config.visualization.metric_overlay セクション辞書
+            （show_overlay / initially_shown / click_policy / legend_position）
+        theta_i_deg, mode, n1, n2: specular 中心決定用条件（overlay 適用時に使用）
 
     Returns:
-        HoloViews Image オブジェクト
+        HoloViews Image / Overlay オブジェクト
     """
     _check_holoviews()
 
@@ -235,7 +247,21 @@ def plot_bsdf_2d_heatmap(
         vdims=["v = sin θ_s sin φ_s"],
     ).opts(color="white", line_dash="dashed", line_width=1)
 
-    return (img * boundary).opts(title=title, frame_width=400, frame_height=400)
+    result = (img * boundary).opts(title=title, frame_width=400, frame_height=400)
+
+    # 光学指標オーバーレイ（metrics_config と metric_overlay_config が両方ある場合）
+    overlay_cfg = metric_overlay_config or {}
+    if metrics_config and overlay_cfg.get("show_overlay", True):
+        from .metric_overlays import overlay_all_metrics_2d
+        result = overlay_all_metrics_2d(
+            result, metrics_config=metrics_config,
+            theta_i_deg=theta_i_deg, mode=mode, n1=n1, n2=n2,
+            click_policy=overlay_cfg.get("click_policy", "hide"),
+            initially_shown=overlay_cfg.get("initially_shown"),
+            legend_position=overlay_cfg.get("legend_position", "right"),
+        )
+
+    return result
 
 
 def create_scale_toggle_panel(
@@ -625,6 +651,10 @@ def _build_condition_panel(
     log_rmse_by_method: dict[str, float],
     xscale: str = "linear",
     secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
+    metrics_config: dict[str, Any] | None = None,
+    metric_overlay_config: dict[str, Any] | None = None,
+    n1: float = 1.0,
+    n2: float = 1.5,
 ) -> Any:
     """1 条件分の 1D オーバーレイ＋2D ヒートマップ Panel を生成する。"""
     _check_holoviews()
@@ -651,6 +681,9 @@ def _build_condition_panel(
             u_g, v_g, bsdf_2d,
             title=f"2D [{method}]",
             log_scale=(scale == "log"),
+            metrics_config=metrics_config,
+            metric_overlay_config=metric_overlay_config,
+            theta_i_deg=theta_i, mode=mode, n1=n1, n2=n2,
         )
         heatmap_plots.append(hm)
 
@@ -676,6 +709,10 @@ def plot_bsdf_report(
     title: str = "BSDF Report",
     n_grid: int = 256,
     secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
+    metrics_config: dict[str, Any] | None = None,
+    metric_overlay_config: dict[str, Any] | None = None,
+    n1: float = 1.0,
+    n2: float = 1.5,
 ) -> Any:
     """1D プロファイル・2D ヒートマップ・指標テーブルをまとめた Panel レポートを生成する。
 
@@ -743,6 +780,9 @@ def plot_bsdf_report(
             cond_panel = _build_condition_panel(
                 df, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
                 xscale=xscale, secondary_x_unit=secondary_x_unit,
+                metrics_config=metrics_config,
+                metric_overlay_config=metric_overlay_config,
+                n1=n1, n2=n2,
             )
             components.append(cond_panel)
     else:
@@ -765,6 +805,9 @@ def plot_bsdf_report(
             cond_panel = _build_condition_panel(
                 df_cond, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
                 xscale=xscale, secondary_x_unit=secondary_x_unit,
+                metrics_config=metrics_config,
+                metric_overlay_config=metric_overlay_config,
+                n1=n1, n2=n2,
             )
             tabs.append((tab_name, cond_panel))
         components.append(pn.Tabs(*tabs, tabs_location="left"))

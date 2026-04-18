@@ -231,6 +231,8 @@ class _BaseBSDFDashboard(ABC):
         fft_mode: str = "tilt",
         fft_apply_fresnel: bool = False,
         secondary_x_unit_default: str = DEFAULT_SECONDARY_X_UNIT,
+        metrics_config: dict[str, Any] | None = None,
+        metric_overlay_config: dict[str, Any] | None = None,
     ) -> None:
         _check_holoviews()
         self.wavelength_um = wavelength_um
@@ -247,6 +249,8 @@ class _BaseBSDFDashboard(ABC):
         self.fft_mode = fft_mode
         self.secondary_x_unit_default = secondary_x_unit_default
         self.fft_apply_fresnel = fft_apply_fresnel
+        self.metrics_config = metrics_config
+        self.metric_overlay_config = metric_overlay_config
 
         # 条件に一致する実測ブロックを事前抽出
         self._matched_meas_df: pd.DataFrame | None = None
@@ -296,6 +300,32 @@ class _BaseBSDFDashboard(ABC):
         return (
             f"λ={self.wavelength_um * 1000:.0f}nm · "
             f"θ_i={self.theta_i_deg:.0f}° · {mode}"
+        )
+
+    def _make_2d_heatmap_with_overlay(
+        self, u: np.ndarray, v: np.ndarray, bsdf: np.ndarray,
+        log_scale: bool = True,
+    ) -> Any:
+        """BSDF 2D ヒートマップに config.visualization.metric_overlay を適用した
+        HoloViews Overlay を返す。config 未指定または show_overlay=False の場合は
+        生のヒートマップのみ返す。
+        """
+        from .holoviews_plots import plot_bsdf_2d_heatmap
+
+        mode_str = "BTDF" if self.is_btdf else "BRDF"
+        # u/v は 1D だが plot_bsdf_2d_heatmap は 2D meshgrid を期待するので拡張
+        if u.ndim == 1:
+            U, V = np.meshgrid(u, v, indexing="ij")
+        else:
+            U, V = u, v
+        return plot_bsdf_2d_heatmap(
+            U, V, bsdf,
+            title=f"2D BSDF · {self._title_suffix()}",
+            log_scale=log_scale,
+            metrics_config=self.metrics_config,
+            metric_overlay_config=self.metric_overlay_config,
+            theta_i_deg=self.theta_i_deg, mode=mode_str,
+            n1=self.n1, n2=self.n2,
         )
 
     @abstractmethod
@@ -560,11 +590,15 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
                     f"BSDF (N={self.preview_grid_size_idle}) · {self._title_suffix()}"
                 )
                 ylim = (ymin, ymax) if fix else None
-                return _make_1d_overlay(
+                plot_1d = _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                     secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
+                plot_2d = self._make_2d_heatmap_with_overlay(
+                    u, v, bsdf, log_scale=(scale == "log"),
+                )
+                return pn.Row(plot_1d, plot_2d)
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
                 return hv.Text(0, 0, f"エラー: {e}")
@@ -710,11 +744,15 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                     f"BSDF (N={self.preview_grid_size_idle}) · {self._title_suffix()}"
                 )
                 ylim = (ymin, ymax) if fix else None
-                return _make_1d_overlay(
+                plot_1d = _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                     secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
+                plot_2d = self._make_2d_heatmap_with_overlay(
+                    u, v, bsdf, log_scale=(scale == "log"),
+                )
+                return pn.Row(plot_1d, plot_2d)
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
                 return hv.Text(0, 0, f"エラー: {e}")
@@ -796,11 +834,15 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
                     f"BSDF (N={self.preview_grid_size_idle}) · {self._title_suffix()}"
                 )
                 ylim = (ymin, ymax) if fix else None
-                return _make_1d_overlay(
+                plot_1d = _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
                     secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
+                plot_2d = self._make_2d_heatmap_with_overlay(
+                    u, v, bsdf, log_scale=(scale == "log"),
+                )
+                return pn.Row(plot_1d, plot_2d)
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
                 return hv.Text(0, 0, f"エラー: {e}")
@@ -877,6 +919,8 @@ def create_dashboard_from_config(
         fft_mode=cfg.fft_mode,
         fft_apply_fresnel=cfg.fft_apply_fresnel,
         secondary_x_unit_default=cfg.secondary_x_unit,
+        metrics_config=cfg._raw.get("metrics"),
+        metric_overlay_config=dict(cfg.metric_overlay),
     )
 
     # 実測 BSDF ファイルの読み込み

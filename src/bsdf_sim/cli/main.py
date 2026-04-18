@@ -521,6 +521,10 @@ def simulate(
                         scale="log",
                         title=f"BSDF Report — {model_name}",
                         secondary_x_unit=_sec_x_unit,
+                        metrics_config=cfg._raw.get("metrics"),
+                        metric_overlay_config=cfg.metric_overlay,
+                        n1=float(cfg._raw.get("simulation", {}).get("n1", 1.0)),
+                        n2=float(cfg._raw.get("simulation", {}).get("n2", 1.5)),
                     )
                     save_html(_report_layout, _report_html)
                     _plot_paths.append(_report_html)
@@ -957,6 +961,10 @@ def dashboard(config: str, port: int, host: str, preview_grid: int, no_browser: 
               type=click.Choice(["lambda_scale", "u", "f", "k_x", "theta_s"]),
               show_default=True,
               help="BSDF 1D プロット副軸ユニット（Λ/u/f/k_x/無し）")
+@click.option("--config", "-c", default=None,
+              help="config.yaml パス。metrics / visualization.metric_overlay 設定を読む（指定しない場合は overlay なし）")
+@click.option("--show-metric-overlay/--no-show-metric-overlay", default=None,
+              help="光学指標オーバーレイの on/off を明示指定（--config 指定時は config 既定を上書き）")
 def visualize(
     run_id: str,
     tracking_uri: str,
@@ -965,6 +973,8 @@ def visualize(
     scale: str,
     log_to_mlflow: bool,
     secondary_x_unit: str,
+    config: str | None,
+    show_metric_overlay: bool | None,
 ) -> None:
     """MLflow の Run から BSDF レポート（1D/2D/指標テーブル）を HTML 出力する。
 
@@ -1011,12 +1021,33 @@ def visualize(
         metrics = None
         logger.warning("metrics の取得に失敗しました。テーブルは省略されます。")
 
+    # config 指定時はオーバーレイ設定を読み込む
+    _metrics_cfg: dict | None = None
+    _overlay_cfg: dict | None = None
+    _n1, _n2 = 1.0, 1.5
+    if config is not None:
+        from ..io.config_loader import BSDFConfig
+        _cfg_obj = BSDFConfig.from_file(config)
+        _metrics_cfg = _cfg_obj._raw.get("metrics")
+        _overlay_cfg = dict(_cfg_obj.metric_overlay)
+        _sim = _cfg_obj._raw.get("simulation", {})
+        _n1 = float(_sim.get("n1", 1.0))
+        _n2 = float(_sim.get("n2", 1.5))
+    # --show-metric-overlay / --no-show-metric-overlay で明示上書き
+    if show_metric_overlay is not None:
+        if _overlay_cfg is None:
+            _overlay_cfg = {}
+        _overlay_cfg["show_overlay"] = bool(show_metric_overlay)
+
     plot = plot_bsdf_report(
         df,
         metrics=metrics,
         scale=scale,
         title=f"BSDF Report — run_id: {run_id[:8]}",
         secondary_x_unit=secondary_x_unit,
+        metrics_config=_metrics_cfg,
+        metric_overlay_config=_overlay_cfg,
+        n1=_n1, n2=_n2,
     )
     save_html(plot, output)
     logger.info(f"HTML 保存: {output}")
