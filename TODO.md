@@ -54,6 +54,13 @@
 |   | 低 | 複数モデル並置比較 | 2 つの RandomRough パラメータセット、または RandomRough vs SphericalArray を左右に並べて比較 | `visualization/dynamicmap.py` |
 |   | 低 | MeasuredSurface パディングセレクタ | `DeviceVk6Surface` 等で `padding: 'tile' / 'zeros' / 'reflect' / 'smooth_tile'` を UI から切替 | `models/measured.py` |
 
+### 指標オーバーレイ可視化
+
+| x | 優先度 | 項目 | 概要 | 関連仕様 |
+|---|---|---|---|---|
+|   | 低 | `overlay_doi_comb_1d` を `hv.VSpans` に置換 | 現状は縦帯を `hv.Rectangles([(x0, -1e30, x1, 1e30), ...])` で擬似実装。Y 軸 log 表示時に `log(-1e30)` 未定義でブラウザコンソール警告の懸念。HoloViews 1.18+ の `hv.VSpans` は y 範囲を軸全体に自動追従するため置換でクリーンになる | `src/bsdf_sim/visualization/metric_overlays.py:368` |
+|   | 低 | 1D COMB overlay の specular 対応（log-x） | `xscale='log'` で `theta_s > 0.05°` フィルタが効くため、`theta_axis_deg=0` (specular) 付近の明スリット縞がほぼ全て非表示になる。BRDF (θ_i=20°/30° 等) では問題ないが、transmission/0° の 1D プロットで overlay が見えない点をドキュメント化するか、log-x 時に対数中心 (例 θ=0.1°) から展開する代替モードを追加 | `src/bsdf_sim/visualization/metric_overlays.py:323` |
+
 ### CLI / UI 拡張
 
 | x | 優先度 | 項目 | 概要 | 関連仕様 |
