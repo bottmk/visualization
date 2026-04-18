@@ -1030,6 +1030,22 @@ panel==1.4.2
 | `TestVisualizeWithShortcut::test_visualize_with_prefix` | プレフィックスで visualize が動作 |
 | `TestVisualizeWithShortcut::test_visualize_with_bad_shortcut_fails` | 未知の metric で visualize が exit_code ≠ 0 |
 
+#### 9.2.14. Parquet スキーマ往復（`tests/test_parquet_roundtrip.py`）
+
+| テスト名 | 検証内容 |
+|---|---|
+| `TestParquetRoundTrip::test_sim_df_roundtrip_equal` | `build_dataframe` → `save_parquet` → `load_parquet` で DataFrame が完全一致 |
+| `TestParquetRoundTrip::test_measured_df_roundtrip_equal` | `build_measured_dataframe` の往復で DataFrame が完全一致 |
+| `TestParquetRoundTrip::test_dtypes_preserved` | `SCHEMA_DTYPES` 定義の全列 dtype（float32 / category / bool）が保持される |
+| `TestParquetRoundTrip::test_categorical_values_preserved` | `polarization` / `mode` / `method` の categories 定義が完全保持 |
+| `TestParquetRoundTrip::test_numeric_values_bitwise_equal` | float32 数値（u, v, θ_s, φ_s, bsdf, log_rmse）が bitwise 一致（snappy はロスレス） |
+| `TestParquetRoundTrip::test_row_order_preserved` | 行の並び順が往復で維持される |
+| `TestParquetRoundTrip::test_nan_log_rmse_preserved` | `log_rmse=None`（→ NaN）が往復後も NaN で保たれる |
+| `TestParquetRoundTrip::test_btdf_mode_preserved` | `is_btdf=True` → `mode='BTDF'` が往復で保たれる |
+| `TestParquetRoundTrip::test_multiple_roundtrips_stable` | save → load → save → load の繰り返しで変化しない |
+| `TestParquetRoundTrip::test_save_creates_parent_dir` | `save_parquet` が親ディレクトリを自動作成 |
+| `TestParquetRoundTrip::test_hemisphere_filter_applied` | 半球外（u² + v² > 1）の点が除外される |
+
 ---
 
 ### 9.3. 物理検証項目
@@ -1053,7 +1069,6 @@ panel==1.4.2
 | 項目 | 優先度 | 備考 |
 |---|---|---|
 | Adding-Doubling 多層合成の数値検証 | 高 | 単層 = 表面のみ計算と一致するか |
-| Parquet スキーマの読み書き往復 | 中 | 保存 → 読み込みでデータが一致するか |
 | Sparkle RGB 多波長モードの数値検証 | 中 | `bsdf_per_wavelength` 使用時の輝度加重が正しいか |
 | DynamicMap / Panel 可視化 | 低 | UIテストは手動確認 |
 | Optuna 最適化収束 | 低 | 既知パラメータへの収束確認 |
@@ -1253,6 +1268,7 @@ $$Q_{s,\text{trans}} = E \cdot |t_s(\theta_i)|^2, \quad Q_{p,\text{trans}} = E \
 
 | 日付 | 変更内容 | 対応コミット |
 |---|---|---|
+| 2026-04-18 | **Parquet スキーマ往復テスト追加 + TODO.md に ID 列導入**（テスト・ドキュメント、挙動変更なし）: (A) `tests/test_parquet_roundtrip.py` を新設し `build_dataframe` / `build_measured_dataframe` → `save_parquet` → `load_parquet` の往復で DataFrame が完全一致することを検証（`TestParquetRoundTrip` 11 件: 等価性・dtype 保持・categorical categories・float32 bitwise 一致・行順維持・NaN 維持・BTDF mode・繰り返し安定性・親ディレクトリ自動作成・半球フィルタ）。spec_main.md Section 9.4 の「Parquet スキーマの読み書き往復」項目を削除し、Section 9.2 に 9.2.14 として追加。(B) `TODO.md` に `ID` 列を追加（`T-XXX` 3 桁通番・不変）、運用ルールに ID 払い出し・参照ルールを明記。Parquet 往復テスト（T-006）を完了扱い。テスト 503→514 件（+11） | 本コミット |
 | 2026-04-18 | **Sparkle Cs の実測校正フレームワーク + 乖離原因の定量分析ドキュメント**（機能追加、後方互換）: (A) 新モジュール `src/bsdf_sim/metrics/sparkle_calibrator.py` を追加し、シミュレーション Cs を実測値にマッピングする 3 モード（`scale` / `polynomial` / `null`）を提供。`apply_calibration(cs_sim, config)` / `fit_scale(sim_list, meas_list)` / `fit_polynomial(sim_list, meas_list)` をエクスポート。(B) `compute_all_optical_metrics` 内で L1/L3/L4/L5 各レベル計算直後に `apply_calibration` が自動適用され、MLflow キー `sparkle_l{level}_fft_<nm>_<deg>_<mode>` に校正後 Cs として記録される（raw は `calibration.mode=null` で取得可能）。(C) `config.yaml` に `metrics.sparkle.calibration` セクション（`mode`/`scale`/`polynomial`）を追加、既定は校正なし（mode=null）で後方互換。(D) `docs/sparkle_calibration.md` を新設し、乖離原因の定量分析結果（窓幅 4.6× 変動・グリッドサイズ N<512 で未収束・分光影響 <7% 等、8 要因を表化）、測定プロトコル（緑点灯 L5 基準）、校正 Phase 1–4 のロードマップ、推奨ワークフローを記載。`docs/sparkle_calculation.md` Section 1.1 警告ブロックから参照。(E) `TestApplyCalibration`（10 件）・`TestFitScale`（4 件）・`TestFitPolynomial`（3 件）・`TestCalibrationIntegration`（1 件）計 18 件のテストを追加。テスト 447→489 件（+42、TODO 2–5 のパイプライン統合分 +24 とこの校正分 +18） | 本コミット |
 | 2026-04-18 | **MLflow params に形状モデル識別・形状パラメータ・sim 条件を追加**（機能拡張、後方互換）: 従来 params は `rq_um`/`lc_um`/`fractal_dim`（RandomRough のみ）に限定され、他モデルでは空だった。`optimization/mlflow_logger.py::build_run_params(cfg)` を新設し、3 カテゴリ独立で登録: (A) 形状識別: `surface_design`（RandomRough/SphericalArray）/ `surface_measured`（Measured/Vk6 等、`MeasuredSurface` サブクラス）/ `bsdf_measured`（LightTools 等、`_detect_bsdf_reader_name` で自動検出）。短縮名は `_short_name()` が末尾 `Surface`/`BsdfReader` と先頭 `Device` を除去。(B) ファイルパス: `shape_data_path` / `bsdf_data_path` を該当時のみ params に登録（tags は使わず）。(C) 形状パラメータ: モデル別に必要な key のみ（RandomRough: rq_um/lc_um/fractal_dim、SphericalArray: radius_um/pitch_um/base_height_um/placement/overlap_mode、Measured 系: padding/source_pixel_size_um/height_unit/leveling/grid_size/pixel_size_um）。(D) sim 条件: `wavelength_um`/`theta_i_deg`/`phi_i_deg`/`mode`/`polarization`/`n1`/`n2` を実測 BSDF 条件と共通語彙で登録（多条件は JSON 文字列、単条件はスカラ）。(E) sim 専用: `fft_mode`/`apply_fresnel`。`cli/main.py` の simulate と optimize 両方で `build_run_params(cfg)` を使用（optimize は `extra={"rq_um": rq, ...}` で trial 値を注入）。`spec_main.md` Section 6.2 に params 仕様表を追加。テスト 461→485 件（+24、`TestShortName` 6 件・`TestStringify` 4 件・`TestBuildRunParams*` 14 件） | 本コミット |
 | 2026-04-18 | **Sparkle L3/L4/L5 パイプライン統合 + L1 メトリクスキー改名（破壊的）**: (A) 命名整理: `compute_sparkle_l3prime` → `compute_sparkle_l3`、docs/コード全体で `L3'` → `L3` に統一（旧 L3 定義「全サブピクセル同色発光」は L3NG として docs 脚注に退避）。(B) 破壊的変更: L1 のメトリクスキーを `sparkle_<method>_<nm>_<deg>_<mode>` → `sparkle_l1_<method>_<nm>_<deg>_<mode>` に改名（案 B 採用、level を明示）。既存 MLflow runs / config.yaml objectives / CLI 例示箇所を一括更新。(C) `compute_all_optical_metrics` に `height_map: HeightMap \| None = None` 引数を追加、`config["sparkle"]["level"]` で L1/L3/L4/L5 を dispatch（`color` で L3/L5 の点灯色指定）。`cli/main.py` の simulate/optimize 両経路で `height_map=hm` を渡すよう修正。(D) `config.yaml` / `sample_inputs/config_device_vk6.yaml` に `sparkle.level`（既定 'L1'）と `sparkle.color`（既定 'G'）を追加。(E) `TestSparkleLevelDispatch` クラスで 7 件の統合テスト追加（level 省略既定・L3 height_map 要求・L3/L4/L5 キー名検証・不正 level エラー・大文字小文字非依存）。テスト 434→447 件（+13） | 本コミット |
