@@ -28,6 +28,10 @@
 #     bsdf visualize --run-id latest --output report.html
 #     bsdf visualize --run-id best:log_rmse_mean --log-to-mlflow
 #
+# (8) 副軸（上段 X 軸）を切替えてレポート出力
+#     bsdf visualize --run-id latest --secondary-x-unit k_x -o report_kx.html
+#     bsdf simulate --config c.yaml --log-to-mlflow --secondary-x-unit u
+#
 # (6) 表面形状だけ PNG で確認
 #     bsdf surface --config sample_inputs/config_comp_meas_bsdf.yaml \
 #                  --format png -o spherical_array.png --unit um
@@ -93,3 +97,10 @@ metrics:
     enabled: false
   sparkle:
     enabled: false
+
+# ── 可視化 ────────────────────────────────────────────────────────────
+visualization:
+  # BSDF 1D プロット副軸（上段 X 軸）。CLI --secondary-x-unit で上書き可能
+  #   'lambda_scale'（既定、AG 凹凸ピッチ Λ=λ/sin θ_s [μm]）
+  #   'u'（方向余弦）/ 'f'（空間周波数）/ 'k_x'（波数）/ 'theta_s'（副軸なし）
+  secondary_x_unit: 'lambda_scale'

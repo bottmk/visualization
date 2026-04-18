@@ -230,6 +230,7 @@ class _BaseBSDFDashboard(ABC):
         measured_tolerance_nm: float = 5.0,
         fft_mode: str = "tilt",
         fft_apply_fresnel: bool = False,
+        secondary_x_unit_default: str = DEFAULT_SECONDARY_X_UNIT,
     ) -> None:
         _check_holoviews()
         self.wavelength_um = wavelength_um
@@ -244,6 +245,7 @@ class _BaseBSDFDashboard(ABC):
         self.measured_tolerance_deg = measured_tolerance_deg
         self.measured_tolerance_nm = measured_tolerance_nm
         self.fft_mode = fft_mode
+        self.secondary_x_unit_default = secondary_x_unit_default
         self.fft_apply_fresnel = fft_apply_fresnel
 
         # 条件に一致する実測ブロックを事前抽出
@@ -345,7 +347,7 @@ class _BaseBSDFDashboard(ABC):
                 "k_x（波数 [rad/μm]）": "k_x",
                 "（表示なし）": "theta_s",
             },
-            value=DEFAULT_SECONDARY_X_UNIT,
+            value=self.secondary_x_unit_default,
         )
         return {
             "yscale": yscale,
@@ -874,6 +876,7 @@ def create_dashboard_from_config(
         preview_grid_size_idle=preview_grid_size_idle,
         fft_mode=cfg.fft_mode,
         fft_apply_fresnel=cfg.fft_apply_fresnel,
+        secondary_x_unit_default=cfg.secondary_x_unit,
     )
 
     # 実測 BSDF ファイルの読み込み

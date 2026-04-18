@@ -381,6 +381,34 @@ class BSDFConfig:
         """
         return bool(self.fft.get("apply_fresnel", False))
 
+    # ── 可視化オプション ───────────────────────────────────────────────────
+
+    @property
+    def visualization(self) -> dict[str, Any]:
+        return self._resolved.get("visualization", {})
+
+    @property
+    def secondary_x_unit(self) -> str:
+        """BSDF 1D プロットの副軸（上段 X 軸）ユニット。
+
+        有効値:
+            - 'lambda_scale'（既定）: 構造スケール Λ = λ/sin θ_s [μm]
+            - 'u': 方向余弦 sin θ_s
+            - 'f': 空間周波数 sin θ_s / λ [μm⁻¹]
+            - 'k_x': 横方向波数 2π sin θ_s / λ [rad/μm]
+            - 'theta_s': 副軸なし
+
+        詳細は src/bsdf_sim/visualization/secondary_axis.py 参照。
+        """
+        valid = ("lambda_scale", "u", "f", "k_x", "theta_s")
+        unit = str(self.visualization.get("secondary_x_unit", "lambda_scale"))
+        if unit not in valid:
+            raise ValueError(
+                f"config.visualization.secondary_x_unit は {valid} のいずれか。"
+                f"値={unit!r}"
+            )
+        return unit
+
     # ── 代表波長（規格準拠の Haze/Gloss/DOI 計算用）────────────────────────
 
     @property

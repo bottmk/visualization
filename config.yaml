@@ -152,6 +152,17 @@ visualization:
     click_policy: 'hide'          # 凡例クリック動作 'hide' / 'mute' / 'none'
     legend_position: 'right'      # 凡例位置 'right' / 'top_right' / 'bottom' 等
 
+  # BSDF 1D プロットの副軸（上段 X 軸）ユニット
+  # dashboard の初期値、visualize レポート HTML の既定値、simulate の
+  # bsdf_report.html 生成に使用される（CLI --secondary-x-unit で上書き可能）
+  # 有効値: 'lambda_scale' / 'u' / 'f' / 'k_x' / 'theta_s'(副軸なし)
+  #   lambda_scale: 構造スケール Λ=λ/sin θ_s [μm]（AG凹凸ピッチ、既定）
+  #   u:            方向余弦 sin θ_s（FFT 自然座標）
+  #   f:            空間周波数 sin θ_s / λ [μm⁻¹]（PSD 横軸）
+  #   k_x:          横方向波数 2π sin θ_s / λ [rad/μm]
+  #   theta_s:      副軸なし
+  secondary_x_unit: 'lambda_scale'
+
 # ── Optuna 最適化 ─────────────────────────────────────────────────────────────
 optuna:
   n_trials: 200

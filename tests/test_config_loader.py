@@ -382,3 +382,26 @@ class TestFFTMode:
         cfg = self._base(fft={"mode": "unknown"})
         with pytest.raises(ValueError, match="fft.mode"):
             _ = cfg.fft_mode
+
+
+class TestSecondaryXUnit:
+    """config.visualization.secondary_x_unit の読み込みとバリデーション。"""
+
+    def _base(self, **overrides):
+        cfg = {**_MINIMAL_CFG, **overrides}
+        return BSDFConfig(cfg)
+
+    def test_default_is_lambda_scale(self):
+        assert self._base().secondary_x_unit == "lambda_scale"
+
+    @pytest.mark.parametrize(
+        "unit", ["lambda_scale", "u", "f", "k_x", "theta_s"]
+    )
+    def test_valid_units(self, unit):
+        cfg = self._base(visualization={"secondary_x_unit": unit})
+        assert cfg.secondary_x_unit == unit
+
+    def test_invalid_raises(self):
+        cfg = self._base(visualization={"secondary_x_unit": "bogus"})
+        with pytest.raises(ValueError, match="secondary_x_unit"):
+            _ = cfg.secondary_x_unit

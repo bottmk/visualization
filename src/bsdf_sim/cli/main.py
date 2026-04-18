@@ -47,6 +47,9 @@ def cli() -> None:
               help="BSDF 実測ファイルパス（.bsdf）。指定時は config.measured_bsdf.path を上書き。")
 @click.option("--match-measured/--no-match-measured", default=None,
               help="実測ファイル内の光学条件を sim 条件として自動採用するか。省略時は config の値を使用。")
+@click.option("--secondary-x-unit", default=None,
+              type=click.Choice(["lambda_scale", "u", "f", "k_x", "theta_s"]),
+              help="BSDF 1D プロット副軸ユニット。指定時は config.visualization.secondary_x_unit を上書き。")
 def simulate(
     config: str,
     output_dir: str,
@@ -55,6 +58,7 @@ def simulate(
     log_to_mlflow: bool,
     measured_bsdf: str | None,
     match_measured: bool | None,
+    secondary_x_unit: str | None,
 ) -> None:
     """BSDF シミュレーションを単体実行する。"""
     from ..io.config_loader import BSDFConfig
@@ -510,11 +514,13 @@ def simulate(
 
                     # bsdf_report.html — 多条件時は Tabs、実測行があれば自動オーバーレイ
                     _report_html = _td / "bsdf_report.html"
+                    _sec_x_unit = secondary_x_unit or cfg.secondary_x_unit
                     _report_layout = plot_bsdf_report(
                         df_combined,
                         metrics=all_metrics,
                         scale="log",
                         title=f"BSDF Report — {model_name}",
+                        secondary_x_unit=_sec_x_unit,
                     )
                     save_html(_report_layout, _report_html)
                     _plot_paths.append(_report_html)
@@ -947,6 +953,10 @@ def dashboard(config: str, port: int, host: str, preview_grid: int, no_browser: 
 @click.option("--scale", default="log", type=click.Choice(["linear", "log"]), show_default=True)
 @click.option("--log-to-mlflow/--no-log-to-mlflow", default=False, show_default=True,
               help="生成した HTML を元 run の artifacts/plots/ に書き戻す（optimize 後の探索用）")
+@click.option("--secondary-x-unit", default="lambda_scale",
+              type=click.Choice(["lambda_scale", "u", "f", "k_x", "theta_s"]),
+              show_default=True,
+              help="BSDF 1D プロット副軸ユニット（Λ/u/f/k_x/無し）")
 def visualize(
     run_id: str,
     tracking_uri: str,
@@ -954,6 +964,7 @@ def visualize(
     output: str,
     scale: str,
     log_to_mlflow: bool,
+    secondary_x_unit: str,
 ) -> None:
     """MLflow の Run から BSDF レポート（1D/2D/指標テーブル）を HTML 出力する。
 
@@ -1005,6 +1016,7 @@ def visualize(
         metrics=metrics,
         scale=scale,
         title=f"BSDF Report — run_id: {run_id[:8]}",
+        secondary_x_unit=secondary_x_unit,
     )
     save_html(plot, output)
     logger.info(f"HTML 保存: {output}")
