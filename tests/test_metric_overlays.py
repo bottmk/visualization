@@ -101,14 +101,22 @@ class TestOverlayDOIComb2D:
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
         result = overlay_doi_comb_2d(bsdf_heatmap)
         assert isinstance(result, hv.Overlay)
-        # Image + band + 最大 4 本の pitch バー（±1, ±2 周期）
-        assert len(list(result)) >= 2
+        # Image + band + 5 幅分の縞レイヤー = 7
+        assert len(list(result)) == 7
 
-    def test_no_pitch_bars(self, bsdf_heatmap):
+    def test_no_stripes(self, bsdf_heatmap):
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
-        result = overlay_doi_comb_2d(bsdf_heatmap, show_pitch_bars=False)
+        result = overlay_doi_comb_2d(bsdf_heatmap, show_stripes=False)
         # Image + band のみ
         assert len(list(result)) == 2
+
+    def test_custom_widths(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
+        result = overlay_doi_comb_2d(
+            bsdf_heatmap, comb_widths_mm=[0.5, 1.0], distance_mm=280.0,
+        )
+        # Image + band + 2 幅 = 4
+        assert len(list(result)) == 4
 
 
 class TestOverlayDOIAstm2D:
@@ -147,15 +155,18 @@ class TestOverlayAllMetrics2D:
             "haze": {"enabled": True},
             "gloss": {"enabled": True, "enabled_angles": [60]},
             "doi_nser": {"enabled": True},
-            "doi_comb": {"enabled": True, "scan_half_angle_deg": 4.0},
+            "doi_comb": {
+                "enabled": True, "scan_half_angle_deg": 4.0,
+                "comb_widths_mm": [0.125, 0.25, 0.5, 1.0, 2.0],
+            },
             "doi_astm": {"enabled": True, "offset_deg": 0.3},
         }
         result = overlay_all_metrics_2d(
             bsdf_heatmap, metrics_config=cfg, theta_i_deg=0.0, mode="BTDF",
         )
         assert isinstance(result, hv.Overlay)
-        # 指標の積分領域が全て追加されていること（具体数は COMB の pitch 本数に依存）
-        assert len(list(result)) >= 8
+        # Image(1) + Haze(1) + Gloss60(1) + NSER(2) + COMB band(1) + 縞 5 幅(5) + ASTM(3) = 14
+        assert len(list(result)) == 14
 
     def test_initially_shown_applies_visibility(self, bsdf_heatmap):
         from bsdf_sim.visualization.metric_overlays import overlay_all_metrics_2d
@@ -301,7 +312,7 @@ class TestOverlayGeometry:
         result = overlay_doi_comb_2d(
             bsdf_heatmap, u_center=0.0, v_center=0.0,
             scan_half_angle_deg=4.0, v_band_half_deg=0.2,
-            show_pitch_bars=False,
+            show_stripes=False,
         )
         rects = _rectangles(result)
         assert len(rects) == 1
@@ -313,26 +324,44 @@ class TestOverlayGeometry:
         assert row["y0"] == pytest.approx(-v_half)
         assert row["y1"] == pytest.approx(+v_half)
 
-    def test_comb_pitch_period(self, bsdf_heatmap):
-        """pitch バーは最小くし幅の周期位置 ±1, ±2 に出る（走査範囲内のみ）。"""
+    def test_comb_stripe_period(self, bsdf_heatmap):
+        """各くし幅の明スリット数と周期が理論値と一致する。"""
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
+        # d=1.0mm, distance=280mm: period_u = 2/280 ≈ 0.00714
+        # u_half = sin(4°) ≈ 0.0698 → k_max = ceil(0.0698/0.00714)+1 = 11 → 明 23 本相当
+        # （端のクリップで幅 0 になるものは除外されうる）
+        result = overlay_doi_comb_2d(
+            bsdf_heatmap, u_center=0.0, scan_half_angle_deg=4.0,
+            comb_widths_mm=[1.0], distance_mm=280.0, show_stripes=True,
+        )
+        rects = _rectangles(result)
+        assert len(rects) == 2  # band + 1 幅分
+        stripe_rect = rects[1]
+        period_u = 2.0 * 1.0 / 280.0
+        # 中心間隔が period_u と一致（連続 2 スリットの中心差）
+        centers = sorted(
+            [(row["x0"] + row["x1"]) / 2 for _, row in stripe_rect.data.iterrows()]
+        )
+        diffs = np.diff(centers)
+        # 端のクリップ区間を除き、内部は period_u
+        interior_diffs = diffs[1:-1] if len(diffs) > 2 else diffs
+        assert np.allclose(interior_diffs, period_u, atol=1e-9)
+
+    def test_comb_stripe_duty_50pct(self, bsdf_heatmap):
+        """明スリット幅 = period/2（duty 50%）。"""
         from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
         result = overlay_doi_comb_2d(
             bsdf_heatmap, u_center=0.0, scan_half_angle_deg=4.0,
-            comb_widths_mm=[0.125, 1.0], distance_mm=280.0, show_pitch_bars=True,
+            comb_widths_mm=[2.0], distance_mm=280.0, show_stripes=True,
         )
-        rects = _rectangles(result)
-        # 1 本目 = band, 残りが pitch バー
-        assert len(rects) >= 2
-        period_u = 2.0 * 0.125 / 280.0
-        u_half = np.sin(np.deg2rad(4.0))
-        # 走査範囲内の k: |k·period_u| <= u_half → |k| <= ~895、よって ±1, ±2 全部入る
-        pitch_rects = rects[1:]  # index 0 は band
-        assert len(pitch_rects) == 4
-        centers = sorted((r.data.iloc[0]["x0"] + r.data.iloc[0]["x1"]) / 2 for r in pitch_rects)
-        expected = sorted([k * period_u for k in (-2, -1, 1, 2)])
-        for c, e in zip(centers, expected):
-            assert c == pytest.approx(e)
-            assert abs(c) <= u_half
+        stripe_rect = _rectangles(result)[1]
+        period_u = 2.0 * 2.0 / 280.0
+        # 非クリップの内部区間を検出（幅 = period_u/2）
+        for _, row in stripe_rect.data.iterrows():
+            width = row["x1"] - row["x0"]
+            # クリップされた端の区間は幅が小さいので、内部の全幅スリットだけチェック
+            if width > period_u / 2.0 * 0.99:
+                assert width == pytest.approx(period_u / 2.0, abs=1e-9)
 
     def test_astm_three_circles(self, bsdf_heatmap):
         from bsdf_sim.visualization.metric_overlays import overlay_doi_astm_2d

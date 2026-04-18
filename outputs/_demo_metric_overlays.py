@@ -144,7 +144,7 @@ def _save_png_matplotlib(
         fill=False, edgecolor="#4fc3ff", linestyle="--", linewidth=2,
         label=f"NSER outer {nser['halo_half_angle_deg']}°",
     ))
-    # DOI-COMB 走査帯 + pitch バー
+    # DOI-COMB 走査帯 + 各くし幅の明スリット縞（duty 50%、bright のみ塗り）
     if cfg.get("doi_comb", {}).get("enabled"):
         comb = cfg["doi_comb"]
         u_half = np.sin(np.deg2rad(comb["scan_half_angle_deg"]))
@@ -154,14 +154,28 @@ def _save_png_matplotlib(
             edgecolor="#ffb347", linewidth=2,
             label=f"COMB band ±{comb['scan_half_angle_deg']}°×{comb['v_band_half_deg']}°",
         ))
-        # 最小くし幅の周期位置（代表として ±1 周期のみ）
-        d_min = float(min(comb["comb_widths_mm"]))
-        period_u = 2.0 * d_min / comb["distance_mm"]
-        for sign in (+1, -1):
-            ax.axvline(
-                sign * period_u, ymin=0.48, ymax=0.52,
-                color="#ffb347", linestyle=":", linewidth=1,
-            )
+        comb_colors = {
+            0.125: "#ffcc80", 0.25: "#ffb347", 0.5: "#ff8c42",
+            1.0: "#ff5722", 2.0: "#bf360c",
+        }
+        for d_mm in comb["comb_widths_mm"]:
+            period_u = 2.0 * float(d_mm) / comb["distance_mm"]
+            bright_half = period_u / 4.0
+            color = comb_colors.get(float(d_mm), "#ffb347")
+            first_label = f"COMB d={d_mm}mm"
+            k_max = int(np.ceil(u_half / period_u)) + 1
+            for k in range(-k_max, k_max + 1):
+                cx = k * period_u
+                x0 = max(cx - bright_half, -u_half)
+                x1 = min(cx + bright_half, u_half)
+                if x1 <= x0:
+                    continue
+                ax.add_patch(Rectangle(
+                    (x0, -v_half), x1 - x0, 2 * v_half,
+                    facecolor=color, edgecolor=color, alpha=0.25, linewidth=0.5,
+                    label=first_label if first_label else None,
+                ))
+                first_label = ""  # 凡例は 1 幅につき 1 エントリ
     # DOI-ASTM 3 円
     if cfg.get("doi_astm", {}).get("enabled"):
         astm = cfg["doi_astm"]

@@ -41,11 +41,19 @@ _DEFAULT_STYLES: dict[str, dict[str, Any]] = {
     "doi_nser_inner": {"color": "#4fc3ff", "line_dash": "solid",  "line_width": 2},
     "doi_nser_outer": {"color": "#4fc3ff", "line_dash": "dashed", "line_width": 2},
     "doi_comb_band":  {"color": "#ffb347", "line_dash": "solid",  "line_width": 2},
-    "doi_comb_scan":  {"color": "#ffb347", "line_dash": "dashed", "line_width": 1},
-    "doi_comb_pitch": {"color": "#ffb347", "line_dash": "dotted", "line_width": 1},
     "doi_astm_center": {"color": "#ff6b6b", "line_dash": "solid",  "line_width": 2},
     "doi_astm_offset": {"color": "#ff6b6b", "line_dash": "dashed", "line_width": 2},
 }
+
+# くし幅ごとの配色（JIS 標準 5 値）。細→太くに向けて色相を変える。
+_COMB_WIDTH_COLORS: dict[float, str] = {
+    0.125: "#ffcc80",  # 淡オレンジ
+    0.25:  "#ffb347",  # オレンジ
+    0.5:   "#ff8c42",
+    1.0:   "#ff5722",
+    2.0:   "#bf360c",  # 濃赤
+}
+_COMB_WIDTH_DEFAULT_COLOR = "#ffb347"
 
 
 def _check_hv() -> None:
@@ -188,6 +196,32 @@ def overlay_doi_nser_2d(
     return heatmap * inner * outer
 
 
+def _comb_bright_rects_u(
+    u_center: float, u_half: float, period_u: float,
+) -> list[tuple[float, float]]:
+    """くしの「明」スリット区間 [x0, x1] のリストを返す。
+
+    JIS K 7374 準拠のくしは duty 50%（明 d、暗 d、周期 2d）。
+    中心 u_center に明スリットの中心を合わせ、走査範囲 ±u_half の内側に入る
+    全ての明区間を返す。
+    """
+    if period_u <= 0 or u_half <= 0:
+        return []
+    bright_half = period_u / 4.0  # 明幅 = period_u/2 → 半幅 = period_u/4
+    k_max = int(np.ceil(u_half / period_u)) + 1
+    out = []
+    for k in range(-k_max, k_max + 1):
+        cx = u_center + k * period_u
+        x0 = cx - bright_half
+        x1 = cx + bright_half
+        # 走査範囲にクリップ
+        x0c = max(x0, u_center - u_half)
+        x1c = min(x1, u_center + u_half)
+        if x1c > x0c:
+            out.append((x0c, x1c))
+    return out
+
+
 def overlay_doi_comb_2d(
     heatmap: Any,
     u_center: float = 0.0,
@@ -196,12 +230,16 @@ def overlay_doi_comb_2d(
     v_band_half_deg: float = 0.2,
     comb_widths_mm: list[float] | None = None,
     distance_mm: float = 280.0,
-    show_pitch_bars: bool = True,
+    show_stripes: bool = True,
+    stripe_alpha: float = 0.25,
     style_band: dict[str, Any] | None = None,
-    style_scan: dict[str, Any] | None = None,
-    style_pitch: dict[str, Any] | None = None,
 ) -> Any:
-    """DOI-COMB（JIS K 7374 光学くし）の走査帯とくし周期を重ねる。
+    """DOI-COMB（JIS K 7374 光学くし）の走査帯とくし縞を重ねる。
+
+    JIS K 7374 は 5 種類のくし幅 [0.125, 0.25, 0.5, 1.0, 2.0] mm で
+    くしを走査し、各幅ごとの明・暗信号の Imax/Imin からコントラストを求め
+    5 値を算術平均する。可視化ではくし幅ごとに明スリットを長方形群として
+    重ね、凡例クリックで各幅を個別表示できるようにする。
 
     Args:
         heatmap: 既存の hv.Image / Overlay
@@ -210,45 +248,44 @@ def overlay_doi_comb_2d(
         v_band_half_deg: P(θ) 抽出時の v 軸バンド半角 [deg]
         comb_widths_mm: くし幅リスト [mm]（None で JIS 標準 5 値）
         distance_mm: 試料〜くし距離 [mm]
-        show_pitch_bars: 最大くし幅の周期位置に破線バーを描画するか
-        style_band / style_scan / style_pitch: 個別スタイル
+        show_stripes: 各くし幅の明スリットを長方形群として描画するか
+        stripe_alpha: 明スリット塗りつぶしの不透明度（0〜1）
+        style_band: 走査帯スタイルの上書き
 
     Returns:
-        heatmap に COMB 解析領域を重ねた Overlay
+        heatmap に COMB 走査帯 + 各くし幅の縞を重ねた Overlay
+        （くし幅 1 種類ごとに 1 レイヤー → 凡例クリックで個別切替可能）
     """
     _check_hv()
     s_band = dict(_DEFAULT_STYLES["doi_comb_band"])
     if style_band:
         s_band.update(style_band)
-    s_scan = dict(_DEFAULT_STYLES["doi_comb_scan"])
-    if style_scan:
-        s_scan.update(style_scan)
-    s_pitch = dict(_DEFAULT_STYLES["doi_comb_pitch"])
-    if style_pitch:
-        s_pitch.update(style_pitch)
 
-    u_half = np.sin(np.deg2rad(scan_half_angle_deg))
-    v_half = np.sin(np.deg2rad(v_band_half_deg))
-    # 走査帯 (v バンド × u 走査幅) の長方形
+    u_half = float(np.sin(np.deg2rad(scan_half_angle_deg)))
+    v_half = float(np.sin(np.deg2rad(v_band_half_deg)))
+    # 走査帯 (v バンド × u 走査幅) の外枠
     band = _rectangle(u_center, v_center, u_half, v_half, **s_band).relabel(
         f"DOI-COMB band ±{scan_half_angle_deg}°×{v_band_half_deg}°"
     )
-
     result = heatmap * band
 
-    # くし周期バー（最小くし幅で 2〜3 本、中心から ±n·period）
-    if show_pitch_bars:
+    if show_stripes:
         widths = comb_widths_mm or [0.125, 0.25, 0.5, 1.0, 2.0]
-        d_min = float(min(widths))
-        period_u = 2.0 * d_min / distance_mm  # 明暗 1 組
-        # ±1, ±2 周期位置に縦破線（hv.VLine が使えない環境もあるため Rectangles で細線）
-        for k in (-2, -1, 1, 2):
-            x = u_center + k * period_u
-            if abs(x - u_center) > u_half:
+        for d_mm in widths:
+            period_u = 2.0 * float(d_mm) / float(distance_mm)
+            rects = _comb_bright_rects_u(u_center, u_half, period_u)
+            if not rects:
                 continue
-            tick = _rectangle(x, v_center, period_u * 0.02, v_half, **s_pitch)
-            label = f"DOI-COMB pitch ({d_min} mm)" if k == 1 else ""
-            result = result * (tick.relabel(label) if label else tick)
+            rect_tuples = [
+                (x0, v_center - v_half, x1, v_center + v_half) for x0, x1 in rects
+            ]
+            color = _COMB_WIDTH_COLORS.get(float(d_mm), _COMB_WIDTH_DEFAULT_COLOR)
+            period_deg = float(np.rad2deg(period_u))
+            stripes = hv.Rectangles(rect_tuples).opts(
+                fill_alpha=stripe_alpha, fill_color=color,
+                line_alpha=0.8, line_color=color, line_width=1,
+            ).relabel(f"COMB d={d_mm}mm (period {period_deg:.3f}°)")
+            result = result * stripes
 
     return result
 
@@ -312,7 +349,7 @@ def _apply_visibility(overlay: Any, shown: set[str] | None) -> Any:
         return overlay
 
     def _layer_key(label: str) -> str | None:
-        lb = label.lower()
+        lb = label.lower().lstrip()
         if lb.startswith("haze"):
             return "haze"
         if lb.startswith("gloss"):
