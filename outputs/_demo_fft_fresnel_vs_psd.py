@@ -31,6 +31,7 @@ from bsdf_sim.models.spherical_array import SphericalArraySurface
 from bsdf_sim.optics.fft_bsdf import compute_bsdf_fft
 from bsdf_sim.optics.fresnel import fresnel_rs, fresnel_rp
 from bsdf_sim.optics.psd_bsdf import compute_bsdf_psd
+from bsdf_sim.visualization.profile_extract import slice_phi0
 
 OUT = Path(__file__).parent / "fft_fresnel_vs_psd.png"
 
@@ -57,17 +58,10 @@ def extract_phi0_slice(
     Averaging a narrow phi band reduces speckle from the single-realization
     surface so the overall envelope is visible.
     """
-    u_axis = u_grid[:, 0]
-    v_axis = v_grid[0, :]
-    v_order = np.argsort(v_axis)
-    v_center_idx = int(np.argmin(np.abs(v_axis[v_order])))
-    i0 = max(0, v_center_idx - v_band_bins)
-    i1 = min(len(v_order), v_center_idx + v_band_bins + 1)
-    cols = v_order[i0:i1]
-    band = bsdf[:, cols]
-    bsdf_row = band.mean(axis=1)
-    order = np.argsort(u_axis)
-    return u_axis[order], np.maximum(bsdf_row[order], 1e-20)
+    return slice_phi0(
+        u_grid, v_grid, bsdf,
+        mode="signed", v_band_bins=v_band_bins, floor=1e-20,
+    )
 
 
 def u_to_theta_s_signed(u: np.ndarray) -> np.ndarray:

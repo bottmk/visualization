@@ -26,6 +26,7 @@ warnings.filterwarnings("ignore")
 from bsdf_sim.models.random_rough import RandomRoughSurface
 from bsdf_sim.models.spherical_array import SphericalArraySurface
 from bsdf_sim.optics.fft_bsdf import compute_bsdf_fft
+from bsdf_sim.visualization.profile_extract import slice_phi0
 
 OUT = Path(__file__).parent / "fft_modes_comparison.png"
 
@@ -37,23 +38,17 @@ THETA_I_LIST = [0.0, 20.0, 45.0, 60.0]
 MODES = ["tilt", "output_shift", "zero"]
 
 
-def extract_phi0_slice(u_grid: np.ndarray, bsdf: np.ndarray):
-    """Return (u_axis, bsdf_row) at v=0 (index j=0), sorted ascending by u."""
-    u_axis = u_grid[:, 0]
-    bsdf_row = bsdf[:, 0]
-    order = np.argsort(u_axis)
-    return u_axis[order], np.maximum(bsdf_row[order], 1e-12)
-
-
 def plot_row(axes, hm, title_suffix: str) -> None:
     for ax, mode in zip(axes, MODES):
         for ti_deg in THETA_I_LIST:
-            u_grid, _, bsdf = compute_bsdf_fft(
+            u_grid, v_grid, bsdf = compute_bsdf_fft(
                 hm, wavelength_um=WAVELENGTH_UM,
                 theta_i_deg=ti_deg, phi_i_deg=0.0,
                 fft_mode=mode,
             )
-            u_axis, bsdf_row = extract_phi0_slice(u_grid, bsdf)
+            u_axis, bsdf_row = slice_phi0(
+                u_grid, v_grid, bsdf, mode="signed", floor=1e-12,
+            )
             u_spec = np.sin(np.deg2rad(ti_deg)) if mode != "zero" else 0.0
             u_rel = u_axis - u_spec
             ax.plot(u_rel, bsdf_row, linewidth=1.2, label=f"theta_i = {ti_deg:.0f} deg")
@@ -79,7 +74,8 @@ def main() -> None:
     spherical = SphericalArraySurface(
         grid_size=GRID_SIZE, pixel_size_um=PIXEL_UM,
         radius_um=5.0, pitch_um=10.0, base_height_um=0.0,
-        placement="Hexagonal", overlap_mode="Maximum", seed=42,
+        placement="Random",#Hexagonal",
+          overlap_mode="Maximum", seed=42,
     )
     hm_sph = spherical.get_height_map()
 

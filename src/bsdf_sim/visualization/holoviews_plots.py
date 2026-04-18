@@ -14,6 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .constants import BSDF_LOG_FLOOR_DEFAULT
+
 try:
     import holoviews as hv
     import panel as pn
@@ -101,7 +103,7 @@ def plot_bsdf_1d_overlay(
             continue
 
         x = sub["theta_s_deg"].values
-        y = np.maximum(sub["bsdf"].values, 1e-10)
+        y = np.maximum(sub["bsdf"].values, BSDF_LOG_FLOOR_DEFAULT)
 
         if method == "measured":
             curve = hv.Scatter(
@@ -153,7 +155,7 @@ def plot_bsdf_2d_heatmap(
     u_axis = u_grid[:, 0]
     v_axis = v_grid[0, :]
 
-    data = np.log10(np.maximum(bsdf, 1e-10)) if log_scale else bsdf
+    data = np.log10(np.maximum(bsdf, BSDF_LOG_FLOOR_DEFAULT)) if log_scale else bsdf
     label = "log₁₀(BSDF)" if log_scale else "BSDF [sr⁻¹]"
 
     img = hv.Image(
@@ -482,7 +484,7 @@ def save_bsdf_2d_png(
         bsdf_2d = bsdf_2d_f.astype(np.float64)
         bsdf_2d[bsdf_2d == 0.0] = np.nan
 
-    data  = np.log10(np.maximum(bsdf_2d, 1e-10)) if log_scale else bsdf_2d
+    data  = np.log10(np.maximum(bsdf_2d, BSDF_LOG_FLOOR_DEFAULT)) if log_scale else bsdf_2d
     label = "log10(BSDF [sr-1])" if log_scale else "BSDF [sr-1]"
 
     fig, ax = plt.subplots(figsize=(5, 5))

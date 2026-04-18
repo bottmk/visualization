@@ -39,6 +39,8 @@ from ..models.base import BaseSurfaceModel, HeightMap
 from ..models.random_rough import RandomRoughSurface
 from ..models.spherical_array import SphericalArraySurface
 from ..optics.fft_bsdf import compute_bsdf_fft
+from .constants import BSDF_LOG_FLOOR_DEFAULT
+from .profile_extract import slice_phi0
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +74,7 @@ def _extract_measured_profile(
     order = np.argsort(sub["theta_s_deg"].values)
     return (
         sub["theta_s_deg"].values[order],
-        np.maximum(sub["bsdf"].values[order], 1e-10),
+        np.maximum(sub["bsdf"].values[order], BSDF_LOG_FLOOR_DEFAULT),
     )
 
 
@@ -105,20 +107,11 @@ def _make_1d_overlay(
         xscale: X軸スケール "linear" or "log"（散乱角）
         ylim: Y軸範囲 (ymin, ymax)。None の場合は自動スケール。
     """
-    # sim: phi≈0 スライス（u 軸方向）
-    # fftfreq では index=0 が v=0（phi=0 方向）。
-    # N//2 は Nyquist 周波数で |v|>1（半球外）になり BSDF=0 になるため 0 を使う。
-    #
-    # ⚠ fftfreq の並びは [0, +, +, ..., Nyq, -, -, -] のため、単純に |u| を取ると
-    #   0→Nyq→0 を折り返す「二重曲線」が描画される。phi=0 プロファイルは u 軸対称なので
-    #   u >= 0 の半分だけを使って theta_s 昇順に並べる。
-    u_axis = u[:, 0]
-    bsdf_slice = bsdf[:, 0]
-    half = (u_axis >= 0) & (np.abs(u_axis) <= 1.0)
-    u_pos = u_axis[half]
-    order = np.argsort(u_pos)
-    u_pos = u_pos[order]
-    y_sim = np.maximum(bsdf_slice[half][order], 1e-10)
+    # sim: phi≈0 スライス（u 軸方向）。BUG-009 対策は profile_extract.slice_phi0
+    # に集約済み（fftfreq 順序・u 正半分のみ・argsort・floor の一貫処理）。
+    u_pos, y_sim = slice_phi0(
+        u, v, bsdf, mode="positive", floor=BSDF_LOG_FLOOR_DEFAULT,
+    )
     x_sim = np.rad2deg(np.arcsin(np.clip(u_pos, 0, 1)))
 
     # log X 軸では theta=0 を除外（log 0 未定義）
@@ -307,6 +300,32 @@ class _BaseBSDFDashboard(ABC):
         )
         return fix_ylim, ymin_input, ymax_input
 
+    def _make_axis_controls(self) -> dict[str, Any]:
+        """Y log/linear + X log/linear + Y 範囲固定 UI を一括生成する。
+
+        3 ダッシュボード（RandomRough / Spherical / Measured）で同じ UI を
+        繰り返し定義していた重複を集約したヘルパー。
+
+        Returns:
+            {"yscale": RadioButtonGroup(Y軸スケール),
+             "xscale": RadioButtonGroup(X軸スケール),
+             "fix_ylim": Checkbox, "ymin": FloatInput, "ymax": FloatInput}
+        """
+        yscale = pn.widgets.RadioButtonGroup(
+            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
+        )
+        xscale = pn.widgets.RadioButtonGroup(
+            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
+        )
+        fix_ylim, ymin, ymax = self._make_ylim_controls()
+        return {
+            "yscale": yscale,
+            "xscale": xscale,
+            "fix_ylim": fix_ylim,
+            "ymin": ymin,
+            "ymax": ymax,
+        }
+
     def serve(
         self,
         port: int = 5006,
@@ -485,20 +504,14 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             name="フラクタル次元", start=fractal_range[0], end=fractal_range[1],
             value=2.5, step=0.05,
         )
-        scale_selector = pn.widgets.RadioButtonGroup(
-            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
-        )
-        xscale_selector = pn.widgets.RadioButtonGroup(
-            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
-        )
-        fix_ylim, ymin_input, ymax_input = self._make_ylim_controls()
+        ctrls = self._make_axis_controls()
 
         meas_profile = self._measured_profile()
 
         @pn.depends(
             rq=rq_slider, lc=lc_slider, fractal=fractal_slider,
-            scale=scale_selector, xscale=xscale_selector,
-            fix=fix_ylim, ymin=ymin_input, ymax=ymax_input,
+            scale=ctrls["yscale"], xscale=ctrls["xscale"],
+            fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
         )
         def update_plot(
             rq: float, lc: float, fractal: float,
@@ -538,8 +551,8 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             pn.Row(
                 pn.Column(
                     rq_slider, lc_slider, fractal_slider,
-                    scale_selector, xscale_selector,
-                    fix_ylim, ymin_input, ymax_input,
+                    ctrls["yscale"], ctrls["xscale"],
+                    ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
                     pn.pane.Markdown(update_metrics),
                     width=300,
                 ),
@@ -634,21 +647,15 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
         overlap_select = pn.widgets.Select(
             name="重なり処理", options=["Maximum", "Additive"], value="Maximum",
         )
-        scale_selector = pn.widgets.RadioButtonGroup(
-            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
-        )
-        xscale_selector = pn.widgets.RadioButtonGroup(
-            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
-        )
-        fix_ylim, ymin_input, ymax_input = self._make_ylim_controls()
+        ctrls = self._make_axis_controls()
 
         meas_profile = self._measured_profile()
 
         @pn.depends(
             radius=radius_slider, pitch=pitch_slider, base=base_slider,
             placement=placement_select, overlap=overlap_select,
-            scale=scale_selector, xscale=xscale_selector,
-            fix=fix_ylim, ymin=ymin_input, ymax=ymax_input,
+            scale=ctrls["yscale"], xscale=ctrls["xscale"],
+            fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
         )
         def update_plot(
             radius: float, pitch: float, base: float,
@@ -697,8 +704,8 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                 pn.Column(
                     radius_slider, pitch_slider, base_slider,
                     placement_select, overlap_select,
-                    scale_selector, xscale_selector,
-                    fix_ylim, ymin_input, ymax_input,
+                    ctrls["yscale"], ctrls["xscale"],
+                    ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
                     pn.pane.Markdown(update_metrics),
                     width=320,
                 ),
@@ -727,19 +734,13 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
         self.model = model
 
     def create_dashboard(self) -> Any:
-        scale_selector = pn.widgets.RadioButtonGroup(
-            name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
-        )
-        xscale_selector = pn.widgets.RadioButtonGroup(
-            name="X軸（角度）スケール", options=["linear", "log"], value="linear",
-        )
-        fix_ylim, ymin_input, ymax_input = self._make_ylim_controls()
+        ctrls = self._make_axis_controls()
 
         meas_profile = self._measured_profile()
 
         @pn.depends(
-            scale=scale_selector, xscale=xscale_selector,
-            fix=fix_ylim, ymin=ymin_input, ymax=ymax_input,
+            scale=ctrls["yscale"], xscale=ctrls["xscale"],
+            fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
         )
         def update_plot(
             scale: str, xscale: str,
@@ -780,8 +781,8 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
             ),
             pn.Row(
                 pn.Column(
-                    scale_selector, xscale_selector,
-                    fix_ylim, ymin_input, ymax_input,
+                    ctrls["yscale"], ctrls["xscale"],
+                    ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
                     pn.pane.Markdown(metrics_md),
                     width=320,
                 ),

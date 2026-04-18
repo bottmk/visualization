@@ -16,7 +16,9 @@ import numpy as np
 
 warnings.filterwarnings("ignore")
 
+from bsdf_sim.visualization.constants import BSDF_LOG_FLOOR_DEFAULT
 from bsdf_sim.visualization.dynamicmap import create_dashboard_from_config
+from bsdf_sim.visualization.profile_extract import slice_phi0
 
 CFG = Path(__file__).parent.parent / "sample_inputs" / "config_comp_meas_bsdf.yaml"
 OUT = Path(__file__).parent / "dashboard_demo_overlay.png"
@@ -31,14 +33,9 @@ def main() -> None:
         placement="Hexagonal", overlap_mode="Maximum", grid_size=256,
     )
 
-    # BUG-009 修正後の sim プロファイル抽出ロジックと同じ
-    u_axis = u[:, 0]
-    bsdf_slice = bsdf[:, 0]
-    half = (u_axis >= 0) & (np.abs(u_axis) <= 1.0)
-    u_pos = u_axis[half]
-    order = np.argsort(u_pos)
-    u_pos = u_pos[order]
-    y_sim = np.maximum(bsdf_slice[half][order], 1e-10)
+    u_pos, y_sim = slice_phi0(
+        u, v, bsdf, mode="positive", floor=BSDF_LOG_FLOOR_DEFAULT,
+    )
     x_sim = np.rad2deg(np.arcsin(np.clip(u_pos, 0, 1)))
 
     prof = dash._measured_profile()

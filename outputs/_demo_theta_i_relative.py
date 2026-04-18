@@ -44,14 +44,12 @@ GRID_SIZE = 1024  # 大きめのグリッドで漏れ分布を相対的に薄め
 PIXEL_UM = 0.25
 
 
+from bsdf_sim.visualization.profile_extract import slice_phi0
+
+
 def extract_phi0_slice(u: np.ndarray, v: np.ndarray, bsdf: np.ndarray):
     """Extract phi=0 (v=0) slice, u >= 0 half, sorted ascending."""
-    u_axis = u[:, 0]
-    bsdf_slice = bsdf[:, 0]
-    half = (u_axis >= 0) & (np.abs(u_axis) <= 1.0)
-    u_pos = u_axis[half]
-    order = np.argsort(u_pos)
-    return u_pos[order], np.maximum(bsdf_slice[half][order], 1e-10)
+    return slice_phi0(u, v, bsdf, mode="positive", floor=1e-10)
 
 
 def main() -> None:
