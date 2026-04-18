@@ -23,6 +23,13 @@ from bsdf_sim.visualization.profile_extract import slice_phi0
 CFG = Path(__file__).parent.parent / "sample_inputs" / "config_comp_meas_bsdf.yaml"
 OUT = Path(__file__).parent / "dashboard_demo_overlay.png"
 
+# ── 軸スケール（dashboard と同じ切替仕様）─────────────────────────────────
+#   YSCALE: "linear" or "log"（BSDF 値）
+#   XSCALE: "linear" or "log"（散乱角 θ_s）。本デモは θ_s ≥ 0 なので log も可。
+#     log 時は θ_s > 0.05° に制限。
+YSCALE = "log"
+XSCALE = "linear"
+
 
 def main() -> None:
     dash = create_dashboard_from_config(str(CFG), preview_grid_size_idle=256)
@@ -43,15 +50,25 @@ def main() -> None:
     x_meas, y_meas = prof
 
     fig, ax = plt.subplots(figsize=(8, 5))
+    # XSCALE="log" 時は log(0) を避けるため theta>0.05° に制限
+    if XSCALE == "log":
+        m_sim = x_sim > 0.05
+        x_sim, y_sim = x_sim[m_sim], y_sim[m_sim]
+        m_meas = x_meas > 0.05
+        x_meas, y_meas = x_meas[m_meas], y_meas[m_meas]
     ax.plot(x_sim, y_sim, color="blue", linewidth=2, label="FFT (sim)")
     ax.scatter(
         x_meas, y_meas, s=40, facecolors="black", edgecolors="white",
         linewidths=0.8, label="Measured", zorder=3,
     )
-    ax.set_yscale("log")
-    ax.set_xlim(0, 90)
-    ax.set_xticks(range(0, 91, 10))
-    ax.set_xticks(range(0, 91, 5), minor=True)
+    ax.set_yscale(YSCALE)
+    if XSCALE == "log":
+        ax.set_xscale("log")
+        ax.set_xlim(0.1, 90)
+    else:
+        ax.set_xlim(0, 90)
+        ax.set_xticks(range(0, 91, 10))
+        ax.set_xticks(range(0, 91, 5), minor=True)
     ax.set_xlabel("Scattering angle theta_s [deg]")
     ax.set_ylabel("BSDF [1/sr]")
     ax.set_title(

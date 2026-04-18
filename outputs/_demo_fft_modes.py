@@ -37,6 +37,13 @@ PIXEL_UM = 0.15     # small enough for output_shift up to theta_i ≈ 70 deg
 THETA_I_LIST = [0.0, 20.0, 45.0, 60.0]
 MODES = ["tilt", "output_shift", "zero"]
 
+# ── 軸スケール（dashboard と同じ切替仕様）─────────────────────────────────
+#   YSCALE: "linear" or "log"（BSDF 値）
+#   XSCALE: "linear" or "log"（u − u_spec）。本デモの X は signed（負値あり）
+#     なので log は非推奨。誤って "log" にした場合は linear に自動 fallback。
+YSCALE = "log"
+XSCALE = "linear"
+
 
 def plot_row(axes, hm, title_suffix: str) -> None:
     for ax, mode in zip(axes, MODES):
@@ -53,7 +60,10 @@ def plot_row(axes, hm, title_suffix: str) -> None:
             u_rel = u_axis - u_spec
             ax.plot(u_rel, bsdf_row, linewidth=1.2, label=f"theta_i = {ti_deg:.0f} deg")
 
-        ax.set_yscale("log")
+        ax.set_yscale(YSCALE)
+        # X は u-u_spec（signed）なので log 指定は無効化
+        if XSCALE == "log":
+            print("warning: XSCALE='log' ignored (signed x axis); using linear.")
         ax.set_xlim(-1.1, 1.1)
         ax.set_xlabel("u - u_spec")
         ax.set_title(f"{title_suffix}  |  mode = '{mode}'", fontsize=10)

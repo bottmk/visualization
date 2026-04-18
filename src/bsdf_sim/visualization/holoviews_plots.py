@@ -48,6 +48,7 @@ def plot_bsdf_1d_overlay(
     wavelength_um: float | None = None,
     mode: str | None = None,
     scale: str = "log",
+    xscale: str = "linear",
     title: str = "BSDF 比較",
     show_haze_boundary: bool = False,
     haze_half_angle_deg: float = 2.5,
@@ -64,7 +65,9 @@ def plot_bsdf_1d_overlay(
         theta_i_deg: 入射天頂角 [deg]でフィルタ。None → df から自動選択
         wavelength_um: 波長 [μm]でフィルタ。None → df から自動選択
         mode: 'BRDF' / 'BTDF' でフィルタ。None → df から自動選択
-        scale: 'linear' / 'log'（デフォルト: 'log'）
+        scale: Y 軸スケール 'linear' / 'log'（デフォルト: 'log'）
+        xscale: X 軸スケール 'linear' / 'log'（デフォルト: 'linear'）。
+            'log' 時は theta_s > 0.05° の点のみ表示し xlim=(0.1, 90)
         title: プロットタイトル
 
     Returns:
@@ -111,6 +114,13 @@ def plot_bsdf_1d_overlay(
         if len(x) == 0:
             continue
 
+        if xscale == "log":
+            mask_log = x > 0.05
+            x = x[mask_log]
+            y = y[mask_log]
+            if len(x) == 0:
+                continue
+
         if method == "measured":
             curve = hv.Scatter(
                 (x, y), kdims=[AXIS_THETA_S_LABEL], vdims=[AXIS_BSDF_LABEL],
@@ -146,13 +156,20 @@ def plot_bsdf_1d_overlay(
             ).opts(color="white", line_dash="dashed", line_width=1.5)
             curves.append(boundary)
 
-    overlay = hv.Overlay(curves).opts(
+    overlay_opts: dict[str, Any] = dict(
         title=title,
         width=700,
         height=450,
         legend_position="top_right",
         logy=(scale == "log"),
+        logx=(xscale == "log"),
     )
+    if xscale == "log":
+        overlay_opts["xlim"] = (0.1, 90)
+    else:
+        overlay_opts["xlim"] = (0, 90)
+
+    overlay = hv.Overlay(curves).opts(**overlay_opts)
     return overlay
 
 
@@ -224,18 +241,29 @@ def create_scale_toggle_panel(
     _check_holoviews()
 
     scale_selector = pn.widgets.RadioButtonGroup(
-        name="軸スケール",
+        name="Y軸スケール",
         options=["linear", "log"],
         value="log",
         button_type="default",
     )
+    xscale_selector = pn.widgets.RadioButtonGroup(
+        name="X軸スケール",
+        options=["linear", "log"],
+        value="linear",
+        button_type="default",
+    )
 
-    @pn.depends(scale=scale_selector)
-    def update_plot(scale: str) -> Any:
-        return plot_bsdf_1d_overlay(df, scale=scale, **plot_kwargs)
+    @pn.depends(scale=scale_selector, xscale=xscale_selector)
+    def update_plot(scale: str, xscale: str) -> Any:
+        return plot_bsdf_1d_overlay(
+            df, scale=scale, xscale=xscale, **plot_kwargs,
+        )
 
     return pn.Column(
-        pn.Row(pn.pane.Markdown("**軸スケール:**"), scale_selector),
+        pn.Row(
+            pn.pane.Markdown("**Y軸:**"), scale_selector,
+            pn.pane.Markdown("**X軸:**"), xscale_selector,
+        ),
         pn.panel(update_plot),
     )
 
@@ -565,6 +593,7 @@ def _build_condition_panel(
     theta_i: float,
     mode: str,
     log_rmse_by_method: dict[str, float],
+    xscale: str = "linear",
 ) -> Any:
     """1 条件分の 1D オーバーレイ＋2D ヒートマップ Panel を生成する。"""
     _check_holoviews()
@@ -573,7 +602,7 @@ def _build_condition_panel(
     title_1d = f"1D BSDF — λ={wl_um * 1000:.0f}nm, θ_i={theta_i:.0f}°, {mode}"
     plot_1d = plot_bsdf_1d_overlay(
         df_cond, wavelength_um=wl_um, theta_i_deg=theta_i, mode=mode,
-        scale=scale, title=title_1d,
+        scale=scale, xscale=xscale, title=title_1d,
     )
 
     # 2D ヒートマップ（手法別）
@@ -611,6 +640,7 @@ def plot_bsdf_report(
     df: "pd.DataFrame",
     metrics: dict[str, float] | None = None,
     scale: str = "log",
+    xscale: str = "linear",
     title: str = "BSDF Report",
     n_grid: int = 256,
 ) -> Any:
@@ -623,7 +653,9 @@ def plot_bsdf_report(
     Args:
         df: BSDF Parquet DataFrame（long format、`method='measured'` 行を含んでよい）
         metrics: MLflow から取得した指標辞書（省略可）
-        scale: 'linear' / 'log'
+        scale: Y 軸スケール 'linear' / 'log'（既定 'log'）
+        xscale: X 軸スケール 'linear' / 'log'（既定 'linear'）。
+            Tab 内 1D プロットに適用される。
         title: レポートタイトル
         n_grid: 2D ヒートマップのグリッドサイズ
 
@@ -677,6 +709,7 @@ def plot_bsdf_report(
             rmse_dict = log_rmse_map.get((wl, theta_i, mode_v), {})
             cond_panel = _build_condition_panel(
                 df, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
+                xscale=xscale,
             )
             components.append(cond_panel)
     else:
@@ -698,6 +731,7 @@ def plot_bsdf_report(
             )
             cond_panel = _build_condition_panel(
                 df_cond, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
+                xscale=xscale,
             )
             tabs.append((tab_name, cond_panel))
         components.append(pn.Tabs(*tabs, tabs_location="left"))

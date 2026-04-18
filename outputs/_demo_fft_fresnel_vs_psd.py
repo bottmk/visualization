@@ -46,6 +46,12 @@ FFT_MODE = "tilt"
 PLACEMENT = "Random"
 V_BAND_BINS = 12        # wider phi band averaging to suppress speckle
 
+# ── 軸スケール（dashboard と同じ切替仕様）─────────────────────────────────
+#   YSCALE: "linear" or "log"（BSDF 値）
+#   XSCALE: signed θ_s（-90〜90°）のため log 非対応、linear 固定推奨
+YSCALE = "log"
+XSCALE = "linear"
+
 
 def extract_phi0_slice(
     u_grid: np.ndarray,
@@ -147,7 +153,9 @@ def main() -> None:
 
         ax.axvline(ti_deg, color="gray", linestyle=":", linewidth=0.8,
                    label="specular (theta_s = theta_i)")
-        ax.set_yscale("log")
+        ax.set_yscale(YSCALE)
+        if XSCALE == "log":
+            print("warning: XSCALE='log' ignored (signed x axis); using linear.")
         ax.set_xlim(-90, 90)
         ax.set_ylim(1e-4, 1e5)
         ax.set_xlabel("theta_s [deg]  (phi=0 plane)")

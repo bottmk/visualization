@@ -43,6 +43,13 @@ FRACTAL_DIM = 2.5
 GRID_SIZE = 1024  # 大きめのグリッドで漏れ分布を相対的に薄める
 PIXEL_UM = 0.25
 
+# ── 軸スケール（dashboard と同じ切替仕様）─────────────────────────────────
+#   YSCALE: "linear" or "log"（BSDF 値・全 3 サブプロット共通）
+#   XSCALE: (A) パネルのみ "log" が意味を持つ（θ_s ≥ 0）。
+#     (B)(C) パネルは signed x（u − u_spec）のため linear 固定。
+YSCALE = "log"
+XSCALE = "linear"
+
 
 from bsdf_sim.visualization.profile_extract import slice_phi0
 
@@ -85,16 +92,20 @@ def main() -> None:
         y_corrected = y * cos_ts / max(cos_ti ** 2, 1e-6)
         axes[2].plot(u_rel, y_corrected, color=color, label=label, linewidth=1.5)
 
-    axes[0].set_yscale("log")
-    axes[0].set_xlim(0, 90)
-    axes[0].set_xticks(range(0, 91, 15))
+    axes[0].set_yscale(YSCALE)
+    if XSCALE == "log":
+        axes[0].set_xscale("log")
+        axes[0].set_xlim(0.1, 90)
+    else:
+        axes[0].set_xlim(0, 90)
+        axes[0].set_xticks(range(0, 91, 15))
     axes[0].set_xlabel("Scattering angle theta_s [deg]")
     axes[0].set_ylabel("BSDF [1/sr]")
     axes[0].set_title("(A) Absolute coords\npeak shifts with theta_i")
     axes[0].grid(True, which="both", alpha=0.3)
     axes[0].legend(loc="upper right", fontsize=9)
 
-    axes[1].set_yscale("log")
+    axes[1].set_yscale(YSCALE)
     axes[1].set_xlim(-1, 1)
     axes[1].set_xlabel("u - u_spec  (= sin theta_s - sin theta_i)")
     axes[1].set_ylabel("BSDF [1/sr]")
@@ -103,7 +114,7 @@ def main() -> None:
     axes[1].legend(loc="upper right", fontsize=9)
     axes[1].axvline(0, color="gray", linestyle=":", linewidth=0.8)
 
-    axes[2].set_yscale("log")
+    axes[2].set_yscale(YSCALE)
     axes[2].set_xlim(-1, 1)
     axes[2].set_xlabel("u - u_spec")
     axes[2].set_ylabel("BSDF * cos(theta_s) / cos^2(theta_i)  [1/sr]")
