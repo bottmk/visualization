@@ -385,6 +385,7 @@ def simulate(
                     all_optical_metrics.update(metrics_std)
 
                 # 波長依存メトリクス (Sparkle): 全条件
+                # height_map は L3/L4/L5 レベル（sparkle.level）で必要
                 metrics_sp = compute_all_optical_metrics(
                     u_grid=u_m, v_grid=v_m, bsdf=bsdf_m,
                     theta_i_deg=theta_i, mode=mode,
@@ -392,6 +393,7 @@ def simulate(
                     method_name=method_key, wavelength_nm=wl_nm,
                     config=cfg.metrics, bsdf_floor=cfg.bsdf_floor,
                     sparkle_only=True,
+                    height_map=hm,
                 )
                 all_optical_metrics.update(metrics_sp)
 
@@ -632,7 +634,7 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
     # 目的関数の設定（config.yaml の optuna.objectives から読み込む）
     default_objectives = [
         {"metric": "haze_fft_0_t",          "direction": "minimize"},
-        {"metric": "sparkle_fft_555_0_t",   "direction": "minimize"},
+        {"metric": "sparkle_l1_fft_555_0_t", "direction": "minimize"},
     ]
     obj_cfg = optuna_cfg.get("objectives", default_objectives)
     directions = [o["direction"] for o in obj_cfg]
@@ -748,6 +750,7 @@ def optimize(config: str, trials: int | None, study_name: str | None) -> None:
                 u_grid=u_m, v_grid=v_m, bsdf=bsdf_m,
                 config=cfg.metrics,
                 bsdf_floor=cfg.bsdf_floor,
+                height_map=hm,
             )
             for k, val in optical_m.items():
                 all_optical[f"{k}_{method_key}"] = val
@@ -821,7 +824,7 @@ def _format_table(rows: list[list[str]], headers: list[str]) -> str:
 @click.option("--limit", "-n", default=20, show_default=True, type=int,
               help="最大表示件数")
 @click.option("--metrics", "-m", default=None,
-              help="カンマ区切りの表示メトリクス名（例: haze_fft_0_t,sparkle_fft_555_0_t）")
+              help="カンマ区切りの表示メトリクス名（例: haze_fft_0_t,sparkle_l1_fft_555_0_t）")
 def runs_list(
     tracking_uri: str,
     experiment: str | None,
@@ -834,7 +837,7 @@ def runs_list(
 
     例:
       bsdf runs list --sort-by haze_fft_0_t --limit 10
-      bsdf runs list -s sparkle_fft_555_0_t -m haze_fft_0_t,sparkle_fft_555_0_t --descending
+      bsdf runs list -s sparkle_l1_fft_555_0_t -m haze_fft_0_t,sparkle_l1_fft_555_0_t --descending
       bsdf runs list -e 02_Analysis_Reports -n 5
     """
     from ..optimization.mlflow_logger import EXPERIMENT_RAW_DATA, list_runs
@@ -982,7 +985,7 @@ def visualize(
       - 32 文字の完全な run_id
       - 'latest' / 'latest-2' / 'latest-5' — 最新から N 番目
       - 'best:haze_fft_0_t' — metric の最小値 run
-      - 'best:sparkle_fft_555_0_t:max' — metric の最大値 run
+      - 'best:sparkle_l1_fft_555_0_t:max' — metric の最大値 run
       - 8 文字以上のプレフィックス（例: 'a1b2c3d4'）
 
     `--log-to-mlflow` を指定すると、生成した HTML を元 run の

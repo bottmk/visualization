@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..models.base import HeightMap
+
 
 # ── 窓中心ヘルパー ───────────────────────────────────────────────────────────
 
@@ -595,12 +597,24 @@ def compute_all_optical_metrics(
     standards_only: bool = False,
     sparkle_only: bool = False,
     allow_oblique: bool = False,
+    height_map: HeightMap | None = None,
 ) -> dict[str, float]:
     """すべての光学指標を一括計算する。
 
     返り値のキーは `<name>_<method>_<deg>_<mode>` 形式（波長依存メトリクスは
     `<name>_<method>_<nm>_<deg>_<mode>`）。規格 θ_i/mode に一致しない条件では
     該当指標は計算されない（斜入射対応は `compute_at_sim_angles` で別制御）。
+
+    Sparkle は `config["sparkle"]["level"]` で評価レベルを選択:
+
+    - `'L1'`（既定）: 従来 `compute_sparkle`（BSDF + 角度ビニング）
+    - `'L3'`: 単色表示 `compute_sparkle_l3`、要 `height_map`、`color` 指定
+    - `'L4'`: 白点灯 `compute_sparkle_l4`、要 `height_map`
+    - `'L5'`: 空間分解 `compute_sparkle_l5`、要 `height_map`、`color` 指定
+
+    キー命名（破壊的変更、案 B）: L1 は `sparkle_l1_<method>_<nm>_<deg>_<mode>`、
+    L3/L4/L5 はそれぞれ `sparkle_l3/l4/l5_<method>_<nm>_<deg>_<mode>`。
+    旧 `sparkle_<method>_<nm>_<deg>_<mode>` 形式は廃止。
 
     Args:
         u_grid, v_grid: 方向余弦グリッド
@@ -710,7 +724,42 @@ def compute_all_optical_metrics(
     if not standards_only:
         sparkle_cfg = cfg.get("sparkle")
         if sparkle_cfg is not None and sparkle_cfg.get("enabled", True):
-            results[f"sparkle{wl_suffix}"] = compute_sparkle(u_grid, v_grid, bsdf, sparkle_cfg)
+            level = str(sparkle_cfg.get("level", "L1")).upper()
+            color = sparkle_cfg.get("color", "G")
+            # L1 は BSDF のみで計算、L3/L4/L5 は HeightMap が必要
+            if level == "L1":
+                results[f"sparkle_l1{wl_suffix}"] = compute_sparkle(
+                    u_grid, v_grid, bsdf, sparkle_cfg
+                )
+            elif height_map is None:
+                raise ValueError(
+                    f"sparkle.level={level!r} は height_map が必要です。"
+                    f" compute_all_optical_metrics の呼び出し元で height_map を渡してください。"
+                )
+            elif level == "L3":
+                from .sparkle_extended import compute_sparkle_l3
+                wl_um = wavelength_nm / 1000.0
+                results[f"sparkle_l3{wl_suffix}"] = compute_sparkle_l3(
+                    height_map, color, sparkle_cfg, wavelength_um=wl_um,
+                    n1=n1, n2=n2, is_btdf=is_btdf,
+                )
+            elif level == "L4":
+                from .sparkle_extended import compute_sparkle_l4
+                results[f"sparkle_l4{wl_suffix}"] = compute_sparkle_l4(
+                    height_map, sparkle_cfg, n1=n1, n2=n2, is_btdf=is_btdf,
+                )
+            elif level == "L5":
+                from .sparkle_extended import compute_sparkle_l5
+                wl_um = wavelength_nm / 1000.0
+                results[f"sparkle_l5{wl_suffix}"] = compute_sparkle_l5(
+                    height_map, color, sparkle_cfg, wavelength_um=wl_um,
+                    n1=n1, n2=n2, is_btdf=is_btdf,
+                )
+            else:
+                raise ValueError(
+                    f"sparkle.level={level!r} は未知です。"
+                    f" 'L1' / 'L3' / 'L4' / 'L5' のいずれかを指定してください。"
+                )
 
         if simulated is not None and measured is not None:
             results[f"log_rmse{wl_suffix}"] = compute_log_rmse(simulated, measured, bsdf_floor)

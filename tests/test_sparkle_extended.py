@@ -1,4 +1,4 @@
-"""L3'/L4/L5 拡張 sparkle 計算のテスト。
+"""L3/L4/L5 拡張 sparkle 計算のテスト。
 
 対象: src/bsdf_sim/metrics/sparkle_extended.py
 """
@@ -11,7 +11,7 @@ from bsdf_sim.metrics.sparkle_extended import (
     _cs_from_luminance,
     _generate_subpixel_mask,
     _v_lambda,
-    compute_sparkle_l3prime,
+    compute_sparkle_l3,
     compute_sparkle_l4,
     compute_sparkle_l5,
 )
@@ -139,26 +139,26 @@ class TestCsFromLuminance:
         assert _cs_from_luminance(np.array([1.0])) == 0.0
 
 
-# ── L3' ──
+# ── L3 ──
 
 
-class TestSparkleL3Prime:
+class TestSparkleL3:
     def test_flat_surface_finite_cs(self, flat_height_map, sparkle_config):
         """平坦面でも Cs は有限値を返す（DC 集中 + サブピクセル Moiré 起因の高い
         apparent Cs になるが、NaN や inf にはならない）。"""
-        cs = compute_sparkle_l3prime(flat_height_map, "G", sparkle_config)
+        cs = compute_sparkle_l3(flat_height_map, "G", sparkle_config)
         assert cs >= 0.0
         assert np.isfinite(cs)
 
     def test_random_surface_positive_sparkle(self, random_height_map, sparkle_config):
         """ランダム粗面では sparkle > 0。"""
-        cs = compute_sparkle_l3prime(random_height_map, "G", sparkle_config)
+        cs = compute_sparkle_l3(random_height_map, "G", sparkle_config)
         assert cs > 0.0
 
     def test_default_wavelength_by_color(self, random_height_map, sparkle_config):
         """wavelength_um=None で色別デフォルト波長が使われる。"""
-        cs_g_default = compute_sparkle_l3prime(random_height_map, "G", sparkle_config)
-        cs_g_explicit = compute_sparkle_l3prime(
+        cs_g_default = compute_sparkle_l3(random_height_map, "G", sparkle_config)
+        cs_g_explicit = compute_sparkle_l3(
             random_height_map, "G", sparkle_config, wavelength_um=_COLOR_WAVELENGTHS_UM["G"]
         )
         assert cs_g_default == pytest.approx(cs_g_explicit)
@@ -166,7 +166,7 @@ class TestSparkleL3Prime:
     def test_different_colors_different_sparkle(self, random_height_map, sparkle_config):
         """R/G/B で通常異なる sparkle 値が得られる（波長依存 + マスク位相依存）。"""
         values = {
-            c: compute_sparkle_l3prime(random_height_map, c, sparkle_config)
+            c: compute_sparkle_l3(random_height_map, c, sparkle_config)
             for c in ("R", "G", "B")
         }
         # 少なくとも 2 色で異なる値
@@ -175,7 +175,7 @@ class TestSparkleL3Prime:
 
     def test_invalid_color_raises(self, random_height_map, sparkle_config):
         with pytest.raises(KeyError):
-            compute_sparkle_l3prime(random_height_map, "X", sparkle_config)  # type: ignore[arg-type]
+            compute_sparkle_l3(random_height_map, "X", sparkle_config)  # type: ignore[arg-type]
 
 
 # ── L4 ──
@@ -189,19 +189,19 @@ class TestSparkleL4:
         assert cs >= 0.0
 
     def test_white_differs_from_single_color(self, random_height_map, sparkle_config):
-        """L4 白点灯 Cs は L3' 単色 Cs と一般に異なる（σ/μ は非線形）。"""
+        """L4 白点灯 Cs は L3 単色 Cs と一般に異なる（σ/μ は非線形）。"""
         cs_white = compute_sparkle_l4(random_height_map, sparkle_config)
-        cs_g = compute_sparkle_l3prime(random_height_map, "G", sparkle_config)
+        cs_g = compute_sparkle_l3(random_height_map, "G", sparkle_config)
         # 明示的な等式不成立を確認
         assert abs(cs_white - cs_g) > 1e-6
 
-    def test_only_green_equivalent_to_l3prime(self, random_height_map, sparkle_config):
-        """R,B の光源強度を 0 にすれば L4 は L3' (G) と数値的に一致する。"""
+    def test_only_green_equivalent_to_l3(self, random_height_map, sparkle_config):
+        """R,B の光源強度を 0 にすれば L4 は L3 (G) と数値的に一致する。"""
         cs_white_g_only = compute_sparkle_l4(
             random_height_map, sparkle_config,
             source_intensity={"R": 0.0, "G": 1.0, "B": 0.0},
         )
-        cs_g = compute_sparkle_l3prime(random_height_map, "G", sparkle_config)
+        cs_g = compute_sparkle_l3(random_height_map, "G", sparkle_config)
         # 重み（V(λ_G)）は σ/μ を変えないためキャンセル
         assert cs_white_g_only == pytest.approx(cs_g, rel=1e-9)
 
@@ -235,7 +235,7 @@ class TestSparkleL5:
 
     def test_flat_surface_low_sparkle(self, sparkle_config_small_pixel):
         """平坦面で L5 は小さい値（窓内で位相が均一 → 画素間で同等 → σ≈0）。
-        L5 は L1/L3' と違い局所 FFT で DC 集中アーティファクトを回避するため、
+        L5 は L1/L3 と違い局所 FFT で DC 集中アーティファクトを回避するため、
         平坦面では本来的に Cs ≈ 0 となる。"""
         N = 512
         hm = HeightMap(data=np.zeros((N, N)), pixel_size_um=0.25)
@@ -300,3 +300,126 @@ class TestSparkleL5:
         )
         # pupil 積分と DC 1 点で異なる値になる
         assert abs(cs_pup - cs_dc) > 1e-6
+
+
+# ── Pipeline 統合テスト ──
+
+
+class TestSparkleLevelDispatch:
+    """compute_all_optical_metrics の sparkle.level dispatch テスト。"""
+
+    @pytest.fixture
+    def _setup_bsdf(self, random_height_map):
+        """L1 評価用に BSDF を 1 回計算しておく。"""
+        from bsdf_sim.optics.fft_bsdf import compute_bsdf_fft
+
+        u, v, bsdf = compute_bsdf_fft(
+            random_height_map, wavelength_um=0.525,
+            theta_i_deg=0.0, phi_i_deg=0.0,
+            is_btdf=True, fft_mode="zero",
+        )
+        return u, v, bsdf
+
+    def test_level_l1_default(self, _setup_bsdf, random_height_map, sparkle_config):
+        """level 省略時は L1 として動作する。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        u, v, bsdf = _setup_bsdf
+        cfg = {"sparkle": {**sparkle_config, "enabled": True}}
+        results = compute_all_optical_metrics(
+            u_grid=u, v_grid=v, bsdf=bsdf,
+            method_name="fft", wavelength_nm=525,
+            config=cfg, sparkle_only=True,
+            height_map=random_height_map,
+        )
+        assert "sparkle_l1_fft_525_0_t" in results
+        assert results["sparkle_l1_fft_525_0_t"] > 0.0
+
+    def test_level_l3_requires_height_map(self, _setup_bsdf, sparkle_config):
+        """L3 選択時に height_map=None ならエラー。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        u, v, bsdf = _setup_bsdf
+        cfg = {"sparkle": {**sparkle_config, "enabled": True, "level": "L3", "color": "G"}}
+        with pytest.raises(ValueError, match="height_map"):
+            compute_all_optical_metrics(
+                u_grid=u, v_grid=v, bsdf=bsdf,
+                method_name="fft", wavelength_nm=525,
+                config=cfg, sparkle_only=True,
+                height_map=None,
+            )
+
+    def test_level_l3_returns_key(self, _setup_bsdf, random_height_map, sparkle_config):
+        """L3 選択時のキー名と値の検証。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        u, v, bsdf = _setup_bsdf
+        cfg = {"sparkle": {**sparkle_config, "enabled": True, "level": "L3", "color": "G"}}
+        results = compute_all_optical_metrics(
+            u_grid=u, v_grid=v, bsdf=bsdf,
+            method_name="fft", wavelength_nm=525,
+            config=cfg, sparkle_only=True,
+            height_map=random_height_map,
+        )
+        assert "sparkle_l3_fft_525_0_t" in results
+        assert "sparkle_l1_fft_525_0_t" not in results  # 排他
+        assert results["sparkle_l3_fft_525_0_t"] > 0.0
+
+    def test_level_l4_returns_key(self, _setup_bsdf, random_height_map, sparkle_config):
+        """L4 白点灯のキー名と値の検証。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        u, v, bsdf = _setup_bsdf
+        cfg = {"sparkle": {**sparkle_config, "enabled": True, "level": "L4"}}
+        results = compute_all_optical_metrics(
+            u_grid=u, v_grid=v, bsdf=bsdf,
+            method_name="fft", wavelength_nm=525,
+            config=cfg, sparkle_only=True,
+            height_map=random_height_map,
+        )
+        assert "sparkle_l4_fft_525_0_t" in results
+        assert results["sparkle_l4_fft_525_0_t"] >= 0.0
+
+    def test_level_l5_returns_key(self, _setup_bsdf, sparkle_config_small_pixel):
+        """L5 のキー名と値の検証（大きめグリッド + 高 PPI 設定）。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        from bsdf_sim.optics.fft_bsdf import compute_bsdf_fft
+
+        rng = np.random.default_rng(42)
+        N = 512
+        hm = HeightMap(data=rng.normal(0.0, 0.05, size=(N, N)), pixel_size_um=0.25)
+        u, v, bsdf = compute_bsdf_fft(
+            hm, wavelength_um=0.525, theta_i_deg=0.0, phi_i_deg=0.0,
+            is_btdf=True, fft_mode="zero",
+        )
+        cfg = {"sparkle": {**sparkle_config_small_pixel, "enabled": True, "level": "L5", "color": "G"}}
+        results = compute_all_optical_metrics(
+            u_grid=u, v_grid=v, bsdf=bsdf,
+            method_name="fft", wavelength_nm=525,
+            config=cfg, sparkle_only=True,
+            height_map=hm,
+        )
+        assert "sparkle_l5_fft_525_0_t" in results
+        assert results["sparkle_l5_fft_525_0_t"] >= 0.0
+
+    def test_unknown_level_raises(self, _setup_bsdf, random_height_map, sparkle_config):
+        """未知の level でエラー。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        u, v, bsdf = _setup_bsdf
+        cfg = {"sparkle": {**sparkle_config, "enabled": True, "level": "L99"}}
+        with pytest.raises(ValueError, match="level"):
+            compute_all_optical_metrics(
+                u_grid=u, v_grid=v, bsdf=bsdf,
+                method_name="fft", wavelength_nm=525,
+                config=cfg, sparkle_only=True,
+                height_map=random_height_map,
+            )
+
+    def test_level_lowercase_accepted(self, _setup_bsdf, random_height_map, sparkle_config):
+        """level は大文字小文字非依存。"""
+        from bsdf_sim.metrics.optical import compute_all_optical_metrics
+        u, v, bsdf = _setup_bsdf
+        cfg = {"sparkle": {**sparkle_config, "enabled": True, "level": "l3", "color": "G"}}
+        results = compute_all_optical_metrics(
+            u_grid=u, v_grid=v, bsdf=bsdf,
+            method_name="fft", wavelength_nm=525,
+            config=cfg, sparkle_only=True,
+            height_map=random_height_map,
+        )
+        assert "sparkle_l3_fft_525_0_t" in results

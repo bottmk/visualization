@@ -20,7 +20,7 @@ from .optical import (
     compute_sparkle,
 )
 from .sparkle_extended import (
-    compute_sparkle_l3prime,
+    compute_sparkle_l3,
     compute_sparkle_l4,
     compute_sparkle_l5,
 )
@@ -88,7 +88,7 @@ __all__ = [
     "compute_doi_comb",
     "compute_doi_astm",
     "compute_sparkle",
-    "compute_sparkle_l3prime",
+    "compute_sparkle_l3",
     "compute_sparkle_l4",
     "compute_sparkle_l5",
     "compute_log_rmse",

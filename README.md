@@ -242,7 +242,7 @@ bsdf runs list [オプション]
 bsdf runs list --sort-by haze_fft_0_t --limit 10
 
 # 表示メトリクスをカスタム指定
-bsdf runs list -s sparkle_fft_555_0_t -m haze_fft_0_t,sparkle_fft_555_0_t --descending
+bsdf runs list -s sparkle_l1_fft_555_0_t -m haze_fft_0_t,sparkle_l1_fft_555_0_t --descending
 ```
 
 ---

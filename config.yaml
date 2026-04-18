@@ -129,6 +129,13 @@ metrics:
     # 規格条件: θ_i=(20|30), BRDF → メトリクス: doi_astm_fft_<deg>_r
   sparkle:
     enabled: true
+    level: 'L1'                 # 'L1' / 'L3' / 'L4' / 'L5'
+                                # L1: 既存実装（全面一様・単波長・角度ビニング）
+                                # L3: 単色表示（サブピクセル + 単波長、要 color 指定）
+                                # L4: 白点灯（R/G/B 3 色合成、V(λ) 重み、narrowband 近似）
+                                # L5: 空間分解 BSDF（窓付き FFT、要 color 指定、最も物理的）
+                                # 詳細: docs/sparkle_approximation_levels.md
+    color: 'G'                  # L3/L5 用の点灯色 'R' / 'G' / 'B'（L1/L4 では無視）
     viewing:
       preset: 'smartphone'      # 'smartphone' / 'tablet' / 'monitor' / 'custom'
       distance_mm: null         # null のときはプリセット値（300mm）
@@ -138,7 +145,8 @@ metrics:
       pixel_pitch_mm: null      # null のときはプリセット値（0.062mm）
       subpixel_layout: null     # null のときはプリセット値（'rgb_stripe'）
     # 多波長は simulation.wavelength_um を list で指定する（波長ごとに独立計算）。
-    # 各条件の Sparkle は sparkle_fft_<nm>_<deg>_<mode> 形式で記録される。
+    # メトリクスキー: sparkle_<level>_<method>_<nm>_<deg>_<mode>
+    # 例: sparkle_l1_fft_525_0_t（L1、525 nm、θ_i=0、BTDF）
 
 # ── 可視化オプション ─────────────────────────────────────────────────────────
 visualization:
@@ -171,7 +179,7 @@ optuna:
   objectives:
     - metric: 'haze_fft_0_t'           # 最小化目標1: FFT法ヘイズ (θ_i=0, BTDF)
       direction: 'minimize'
-    - metric: 'sparkle_fft_555_0_t'    # 最小化目標2: FFT法ギラツキ (555nm, θ_i=0, BTDF)
+    - metric: 'sparkle_l1_fft_555_0_t' # 最小化目標2: FFT法ギラツキ (L1, 555nm, θ_i=0, BTDF)
       direction: 'minimize'
     # PSD法の指標を使う例（指定するとPSD計算が自動で追加される）:
     # - metric: 'haze_psd_0_t'

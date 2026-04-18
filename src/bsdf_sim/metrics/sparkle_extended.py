@@ -1,12 +1,16 @@
-"""ギラツキ計算の拡張レベル L3' / L4 / L5 の実装。
+"""ギラツキ計算の拡張レベル L3 / L4 / L5 の実装。
 
 近似階層の定義と数式は `docs/sparkle_approximation_levels.md` を参照。
 
 | Level | 分光 | 空間発光 | AG 応答 |
 |---|---|---|---|
-| L3' | 単波長 (該当色) | サブピクセル限定発光 | グローバル BSDF |
+| L3 | 単波長 (該当色) | サブピクセル限定発光 | グローバル BSDF |
 | L4 | V(λ) 重み + 各色代表波長 | サブピクセル限定発光 (色ごと) | グローバル BSDF |
 | L5 | V(λ) 重み | サブピクセル限定発光 | 空間分解 BSDF (窓付き FFT) |
+
+注: 以前のドキュメント草案の L3（サブピクセル + 該当色のみ点灯）を正式に L3 として採用。
+    物理的に非現実的だった旧 L3 定義（全サブピクセル同色発光）は L3NG として退避し
+    `docs/sparkle_approximation_levels.md` に参考記録のみ残す。
 
 物理単位は μm 統一。
 """
@@ -80,7 +84,7 @@ def _compute_phase(
         位相分布 φ(x, y) [rad]、shape = (N, N)
     """
     if theta_i_deg != 0.0:
-        raise NotImplementedError("L3'/L4/L5 は現状 theta_i_deg=0 のみサポート")
+        raise NotImplementedError("L3/L4/L5 は現状 theta_i_deg=0 のみサポート")
     h = height_map.data.astype(np.float64)
     k = 2 * np.pi / wavelength_um
     if is_btdf:
@@ -217,10 +221,10 @@ def _cs_from_luminance(L_k: np.ndarray) -> float:
     return float(sigma / mu)
 
 
-# ── L3': 単色表示（サブピクセル限定発光 + 単波長） ───────────────────────────
+# ── L3: 単色表示（サブピクセル限定発光 + 単波長） ────────────────────────────
 
 
-def compute_sparkle_l3prime(
+def compute_sparkle_l3(
     height_map: HeightMap,
     color: Color,
     sparkle_config: dict,
@@ -229,7 +233,7 @@ def compute_sparkle_l3prime(
     n2: float = 1.5,
     is_btdf: bool = True,
 ) -> float:
-    """L3': 単色表示 (R/G/B いずれか単独点灯) での sparkle Cs = σ/μ を計算する。
+    """L3: 単色表示 (R/G/B いずれか単独点灯) での sparkle Cs = σ/μ を計算する。
 
     該当色のサブピクセル位置のみ発光、単一代表波長で評価。
 
@@ -294,7 +298,7 @@ def compute_sparkle_l4(
     narrowband 近似: 各色は代表波長 1 点で評価する（S_c(λ) ≈ δ(λ-λ_c)）。分光幅を
     考慮した完全版は将来拡張とする（docs/sparkle_approximation_levels.md Section 6）。
 
-    ⚠️ **警告**: L3' と同じ角度ビニング方式のため、返り値 Cs は SEMI D63 / IDMS
+    ⚠️ **警告**: L3 と同じ角度ビニング方式のため、返り値 Cs は SEMI D63 / IDMS
     実測値より 100–1500× 大きい apparent 値。**相対比較用途のみ** で使用し、絶対値
     が必要な場合は `compute_sparkle_l5` を使うこと。
 
@@ -371,7 +375,7 @@ def compute_sparkle_l5(
 
     ディスプレイ画素ごとに窓付き FFT で局所 BSDF を計算し、観察者方向付近で
     輝度を積分して L_k を得る。AG フィルムが空間的に不均一な場合や L_c / p が
-    小さくない場合に L3'/L4 よりも物理的に厳密な評価を与える。
+    小さくない場合に L3/L4 よりも物理的に厳密な評価を与える。
 
     単色評価（1 色のみ点灯）とし、窓幅は画素ピッチ × window_size_factor とする。
 

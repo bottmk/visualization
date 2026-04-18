@@ -41,7 +41,7 @@
 |   | 低 | 完全スペクトル積分モード | `simulation.illuminant: 'D65' / 'C' / 'A'` 等で 11 波長自動サンプリング + CIE V(λ) 積分で Haze/Gloss/DOI を計算。計算時間 5〜10 倍（案 3 として相談済み・保留） | spec_main.md Section 5.3 |
 |   | 低 | Sparkle RGB 合成の再導入 | 旧 `bsdf_per_wavelength` + CIE 輝度加重分岐は dead code として削除済み。`sparkle.rgb_combine: true` オプションで復活し多波長時に `sparkle_fft_photopic` として記録する設計が可能（需要次第） | `metrics/optical.py` |
 |   | 中 | Sparkle L2（多波長 V(λ)・グローバル BSDF）実装 | L1 の単波長をそのまま多波長展開した階層。画素全面一様発光 × 多波長 BSDF × $V(\lambda)$ 重みで輝度合成。L4 (サブピクセル) より簡単だが SEMI D63 白点灯の規格対応により近い。FFT 回数 $N_\lambda$ 回で計算可能 | `metrics/sparkle_extended.py` / docs/sparkle_approximation_levels.md 表 22 行目 |
-|   | 中 | Sparkle L3'/L4/L5 の CLI/simulate パイプライン統合 | `compute_sparkle_l3prime` / `compute_sparkle_l4` / `compute_sparkle_l5` は実装済みだが、`config.yaml` の `sparkle.level: L3prime / L4 / L5` 選択で `cli/main.py` の simulate パイプラインから呼び出せない。MLflow メトリクス名（`sparkle_l3prime_fft_525_0_r` 等）と pytest 統合テストも要追加 | spec_main.md 10.2 「CLI/simulate パイプライン統合は将来拡張」/ `cli/main.py` / `metrics/__init__.py` |
+| x | 中 | Sparkle L3/L4/L5 の CLI/simulate パイプライン統合 | `compute_sparkle_l3` / `compute_sparkle_l4` / `compute_sparkle_l5` を `config.yaml` の `sparkle.level: 'L1' / 'L3' / 'L4' / 'L5'` で切替可能にし、`cli/main.py` の simulate パイプラインから呼び出せるように統合。MLflow メトリクス名も `sparkle_l1_fft_525_0_r` / `sparkle_l3_fft_525_0_r` 等に統一（L1 も破壊的改名、案 B）。pytest 統合テスト追加 | spec_main.md 10.2 / `cli/main.py` / `metrics/__init__.py` |
 |   | 低 | Sparkle L4 完全版（narrowband 近似脱却） | 現 `compute_sparkle_l4` は R/G/B 各色を単波長近似（narrowband）で計算。各色ピーク周辺の分光幅を積分する厳密版が未実装 | `metrics/sparkle_extended.py:295` docstring / docs/sparkle_approximation_levels.md Section 6 |
 
 ### Dashboard 機能拡張

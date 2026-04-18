@@ -97,5 +97,6 @@ metrics:
     enabled: false
   sparkle:
     enabled: false
+    level: 'L1'                 # 'L1' / 'L3' / 'L4' / 'L5'
     # Sparkle は波長ごとに独立計算・記録される
-    # (例: sparkle_fft_wl465nm_aoi0_brdf / sparkle_fft_wl525nm_aoi0_brdf)
+    # (例: sparkle_l1_fft_525_0_r / sparkle_l5_fft_465_0_t)
