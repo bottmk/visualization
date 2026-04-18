@@ -43,6 +43,8 @@ def plot_bsdf_1d_overlay(
     mode: str | None = None,
     scale: str = "log",
     title: str = "BSDF 比較",
+    show_haze_boundary: bool = False,
+    haze_half_angle_deg: float = 2.5,
 ) -> Any:
     """FFT/PSD/実測 BSDF の1次元オーバーレイプロットを生成する。
 
@@ -120,6 +122,25 @@ def plot_bsdf_1d_overlay(
 
     if not curves:
         return hv.Text(0, 0, "表示できるデータなし")
+
+    # Haze 境界（2.5° 縦破線）のオプショナル描画
+    if show_haze_boundary:
+        # VLine は凡例に出ないので Curve で 2 点線を代用してラベルを付ける
+        # y 範囲は適当に広め（Curve データの min/max を取得）
+        y_vals = np.concatenate([c.data["BSDF [sr⁻¹]"] if hasattr(c, "data") else [] for c in curves])
+        y_vals = np.array([v for v in y_vals if v is not None and np.isfinite(v)])
+        if y_vals.size > 0:
+            y_lo = float(y_vals.min())
+            y_hi = float(y_vals.max())
+            # log 軸考慮: フロアを下回らないように
+            y_lo = max(y_lo, BSDF_LOG_FLOOR_DEFAULT)
+            boundary = hv.Curve(
+                [(haze_half_angle_deg, y_lo), (haze_half_angle_deg, y_hi)],
+                kdims=["散乱角 θ_s [deg]"],
+                vdims=["BSDF [sr⁻¹]"],
+                label=f"Haze {haze_half_angle_deg}°境界",
+            ).opts(color="white", line_dash="dashed", line_width=1.5)
+            curves.append(boundary)
 
     overlay = hv.Overlay(curves).opts(
         title=title,
@@ -512,10 +533,13 @@ def df_to_2d_grid(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """long-format DataFrame の (u, v, bsdf) から 2D グリッドを再構築する。
 
-    np.bincount ビン集計を使用（scipy 不要・大規模点群でも高速）。
+    本関数は `_bsdf_1d_to_2d_binned` の **DataFrame アダプタ**で、3 列を
+    抽出して委譲するだけ。binning 本体（`np.bincount` ベース）のロジックは
+    `_bsdf_1d_to_2d_binned` に集約されている。
 
     Args:
         df_method: method でフィルタ済みの BSDF DataFrame
+            （列: `u`, `v`, `bsdf`）
         n_grid: 出力グリッドサイズ
 
     Returns:
