@@ -96,6 +96,36 @@ class TestOverlayDOINSER2D:
         assert isinstance(result, hv.Overlay)
 
 
+class TestOverlayDOIComb2D:
+    def test_basic(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
+        result = overlay_doi_comb_2d(bsdf_heatmap)
+        assert isinstance(result, hv.Overlay)
+        # Image + band + 最大 4 本の pitch バー（±1, ±2 周期）
+        assert len(list(result)) >= 2
+
+    def test_no_pitch_bars(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_comb_2d
+        result = overlay_doi_comb_2d(bsdf_heatmap, show_pitch_bars=False)
+        # Image + band のみ
+        assert len(list(result)) == 2
+
+
+class TestOverlayDOIAstm2D:
+    def test_three_circles(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_astm_2d
+        result = overlay_doi_astm_2d(bsdf_heatmap)
+        # Image + center + offset+ + offset- = 4 要素
+        assert len(list(result)) == 4
+
+    def test_custom_offset(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_doi_astm_2d
+        result = overlay_doi_astm_2d(
+            bsdf_heatmap, offset_deg=0.5, aperture_half_deg=0.1,
+        )
+        assert isinstance(result, hv.Overlay)
+
+
 class TestOverlayAllMetrics2D:
     def test_all_enabled(self, bsdf_heatmap):
         from bsdf_sim.visualization.metric_overlays import overlay_all_metrics_2d
@@ -110,6 +140,42 @@ class TestOverlayAllMetrics2D:
         assert isinstance(result, hv.Overlay)
         # Image + Haze(1) + Gloss 3 色(3) + NSER(2) = 7 要素
         assert len(list(result)) == 7
+
+    def test_with_comb_and_astm(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_all_metrics_2d
+        cfg = {
+            "haze": {"enabled": True},
+            "gloss": {"enabled": True, "enabled_angles": [60]},
+            "doi_nser": {"enabled": True},
+            "doi_comb": {"enabled": True, "scan_half_angle_deg": 4.0},
+            "doi_astm": {"enabled": True, "offset_deg": 0.3},
+        }
+        result = overlay_all_metrics_2d(
+            bsdf_heatmap, metrics_config=cfg, theta_i_deg=0.0, mode="BTDF",
+        )
+        assert isinstance(result, hv.Overlay)
+        # 指標の積分領域が全て追加されていること（具体数は COMB の pitch 本数に依存）
+        assert len(list(result)) >= 8
+
+    def test_initially_shown_applies_visibility(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_all_metrics_2d
+        cfg = {
+            "haze": {"enabled": True},
+            "gloss": {"enabled": True, "enabled_angles": [20, 60, 85]},
+            "doi_nser": {"enabled": True},
+        }
+        result = overlay_all_metrics_2d(
+            bsdf_heatmap, metrics_config=cfg,
+            initially_shown=["haze", "gloss_60"],
+        )
+        # visible=False が 4 レイヤー（gloss_20 / gloss_85 / NSER inner / NSER outer）に
+        # 適用されていることを確認
+        hidden = 0
+        for item in result:
+            opts = item.opts.get()
+            if "visible" in opts.kwargs and opts.kwargs["visible"] is False:
+                hidden += 1
+        assert hidden == 4
 
     def test_partial_enabled(self, bsdf_heatmap):
         from bsdf_sim.visualization.metric_overlays import overlay_all_metrics_2d
@@ -139,6 +205,38 @@ class TestOverlayAllMetrics2D:
             theta_i_deg=30.0, mode="BRDF",
         )
         assert isinstance(result, hv.Overlay)
+
+
+class TestOverlayFromConfig:
+    def test_show_overlay_false(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_from_config
+        full_cfg = {
+            "visualization": {"metric_overlay": {"show_overlay": False}},
+            "metrics": {"haze": {"enabled": True}},
+        }
+        result = overlay_from_config(bsdf_heatmap, full_cfg)
+        # heatmap そのまま（Overlay に包まれていない）
+        assert result is bsdf_heatmap
+
+    def test_show_overlay_true(self, bsdf_heatmap):
+        from bsdf_sim.visualization.metric_overlays import overlay_from_config
+        full_cfg = {
+            "visualization": {
+                "metric_overlay": {
+                    "show_overlay": True,
+                    "initially_shown": ["haze"],
+                    "click_policy": "mute",
+                }
+            },
+            "metrics": {
+                "haze": {"enabled": True},
+                "gloss": {"enabled": True, "enabled_angles": [60]},
+            },
+        }
+        result = overlay_from_config(bsdf_heatmap, full_cfg)
+        assert isinstance(result, hv.Overlay)
+        # Image + Haze + Gloss60 = 3 要素
+        assert len(list(result)) == 3
 
 
 class TestHazeBoundaryIn1DOverlay:

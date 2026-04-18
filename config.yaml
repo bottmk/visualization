@@ -140,6 +140,18 @@ metrics:
     # 多波長は simulation.wavelength_um を list で指定する（波長ごとに独立計算）。
     # 各条件の Sparkle は sparkle_fft_<nm>_<deg>_<mode> 形式で記録される。
 
+# ── 可視化オプション ─────────────────────────────────────────────────────────
+visualization:
+  # BSDF 2D ヒートマップへの光学指標オーバーレイ（Haze/Gloss/DOI-NSER/COMB/ASTM）
+  # HoloViews+Bokeh 構成で凡例クリックによる表示/非表示切替に対応。
+  metric_overlay:
+    show_overlay: true            # 全体 on/off。false で全 overlay 非表示
+    initially_shown: null         # 初期表示するキーのリスト（null=全表示）
+                                  # 使えるキー: 'haze', 'gloss_20', 'gloss_60', 'gloss_85',
+                                  #   'doi_nser', 'doi_comb', 'doi_astm'
+    click_policy: 'hide'          # 凡例クリック動作 'hide' / 'mute' / 'none'
+    legend_position: 'right'      # 凡例位置 'right' / 'top_right' / 'bottom' 等
+
 # ── Optuna 最適化 ─────────────────────────────────────────────────────────────
 optuna:
   n_trials: 200
