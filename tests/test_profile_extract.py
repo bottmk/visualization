@@ -1,11 +1,13 @@
-"""Tests for visualization.profile_extract.slice_phi0."""
+"""Tests for visualization.profile_extract (slice_phi0, sort_and_floor)."""
 
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
-from bsdf_sim.visualization.profile_extract import slice_phi0
+from bsdf_sim.visualization.constants import BSDF_LOG_FLOOR_DEFAULT
+from bsdf_sim.visualization.profile_extract import slice_phi0, sort_and_floor
 
 
 def _make_fft_grid(N: int, dx: float, wavelength_um: float):
@@ -74,3 +76,42 @@ class TestSlicePhi0:
         bsdf = np.ones_like(u)
         with pytest.raises(ValueError):
             slice_phi0(u, v, bsdf, mode="bogus")
+
+
+class TestSortAndFloor:
+    def test_sorts_by_theta_s(self):
+        df = pd.DataFrame({
+            "theta_s_deg": [30.0, 10.0, 20.0],
+            "bsdf":        [3.0,  1.0,  2.0],
+        })
+        x, y = sort_and_floor(df)
+        np.testing.assert_array_equal(x, [10.0, 20.0, 30.0])
+        np.testing.assert_array_equal(y, [1.0, 2.0, 3.0])
+
+    def test_applies_floor(self):
+        df = pd.DataFrame({
+            "theta_s_deg": [0.0, 45.0],
+            "bsdf":        [1e-30, 1.0],
+        })
+        _, y = sort_and_floor(df, floor=1e-6)
+        assert y[0] == 1e-6
+        assert y[1] == 1.0
+
+    def test_empty_returns_empty_arrays(self):
+        df = pd.DataFrame({"theta_s_deg": [], "bsdf": []})
+        x, y = sort_and_floor(df)
+        assert len(x) == 0
+        assert len(y) == 0
+
+    def test_none_returns_empty_arrays(self):
+        x, y = sort_and_floor(None)
+        assert len(x) == 0
+        assert len(y) == 0
+
+    def test_default_floor_is_module_constant(self):
+        df = pd.DataFrame({
+            "theta_s_deg": [0.0],
+            "bsdf":        [0.0],
+        })
+        _, y = sort_and_floor(df)
+        assert y[0] == BSDF_LOG_FLOOR_DEFAULT

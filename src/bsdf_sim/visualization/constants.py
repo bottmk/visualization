@@ -12,3 +12,9 @@
 from __future__ import annotations
 
 BSDF_LOG_FLOOR_DEFAULT: float = 1e-10
+
+# phi_s≈0 プロファイルと見なす方位角の許容幅 [deg]。
+# 実測データ（LightTools 等）は phi_s=0 ちょうどではなく±数度の点を持つことが
+# 多いため、ある程度の許容幅が必要。dashboard と visualize レポートで同じ値を
+# 使うよう定数化（以前は両方 6.0 で重複）。
+MEASURED_PHI_S_TOL_DEG: float = 6.0

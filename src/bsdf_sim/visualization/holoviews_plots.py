@@ -14,7 +14,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .constants import BSDF_LOG_FLOOR_DEFAULT
+from .constants import BSDF_LOG_FLOOR_DEFAULT, MEASURED_PHI_S_TOL_DEG
+from .profile_extract import sort_and_floor
 
 try:
     import holoviews as hv
@@ -81,7 +82,7 @@ def plot_bsdf_1d_overlay(
     mask = (
         (np.abs(df["theta_i_deg"] - theta_i_deg) < 0.5)
         & (np.abs(df["wavelength_um"] - wavelength_um) < 0.01)
-        & (np.abs(df["phi_s_deg"] - phi_s_deg) < 6.0)  # ±5° の許容範囲
+        & (np.abs(df["phi_s_deg"] - phi_s_deg) < MEASURED_PHI_S_TOL_DEG)
     )
     if mode is not None and "mode" in df.columns:
         mask = mask & (df["mode"].astype(str) == mode)
@@ -100,12 +101,10 @@ def plot_bsdf_1d_overlay(
 
     curves = []
     for method, style in style_map.items():
-        sub = filtered[filtered["method"] == method].sort_values("theta_s_deg")
-        if sub.empty:
+        sub = filtered[filtered["method"] == method]
+        x, y = sort_and_floor(sub)
+        if len(x) == 0:
             continue
-
-        x = sub["theta_s_deg"].values
-        y = np.maximum(sub["bsdf"].values, BSDF_LOG_FLOOR_DEFAULT)
 
         if method == "measured":
             curve = hv.Scatter(

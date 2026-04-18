@@ -39,8 +39,8 @@ from ..models.base import BaseSurfaceModel, HeightMap
 from ..models.random_rough import RandomRoughSurface
 from ..models.spherical_array import SphericalArraySurface
 from ..optics.fft_bsdf import compute_bsdf_fft
-from .constants import BSDF_LOG_FLOOR_DEFAULT
-from .profile_extract import slice_phi0
+from .constants import BSDF_LOG_FLOOR_DEFAULT, MEASURED_PHI_S_TOL_DEG
+from .profile_extract import slice_phi0, sort_and_floor
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def _check_holoviews() -> None:
 
 def _extract_measured_profile(
     measured_df: pd.DataFrame,
-    phi_s_tolerance_deg: float = 6.0,
+    phi_s_tolerance_deg: float = MEASURED_PHI_S_TOL_DEG,
 ) -> tuple[np.ndarray, np.ndarray]:
     """実測 DataFrame から phi_s≈0 の 1D プロファイルを抽出する。
 
@@ -68,14 +68,7 @@ def _extract_measured_profile(
     if measured_df is None or len(measured_df) == 0:
         return np.array([]), np.array([])
     mask = np.abs(measured_df["phi_s_deg"].values) < phi_s_tolerance_deg
-    sub = measured_df[mask]
-    if len(sub) == 0:
-        return np.array([]), np.array([])
-    order = np.argsort(sub["theta_s_deg"].values)
-    return (
-        sub["theta_s_deg"].values[order],
-        np.maximum(sub["bsdf"].values[order], BSDF_LOG_FLOOR_DEFAULT),
-    )
+    return sort_and_floor(measured_df[mask])
 
 
 def _xticks_hook(plot: Any, element: Any) -> None:
