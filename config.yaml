@@ -207,6 +207,15 @@ optuna:
     distance_threshold: 0.01    # 正規化ユークリッド距離閾値
 
 # ── MLflow 管理 ───────────────────────────────────────────────────────────────
+# simulate --log-to-mlflow / optimize 時に 01_BSDF_Raw_Data 実験に記録される。
+# run の params は本 config から自動構築される（新規 key の追加不要）:
+#   形状識別: surface_design / surface_measured / bsdf_measured （短縮名）
+#   ファイルパス: shape_data_path / bsdf_data_path （該当時のみ）
+#   形状パラメータ: rq_um / lc_um / fractal_dim / radius_um / pitch_um / ...
+#   sim 条件: wavelength_um / theta_i_deg / phi_i_deg / mode / polarization /
+#            n1 / n2 （多条件は JSON 文字列、単条件はスカラ）
+#   sim 専用: fft_mode / apply_fresnel
+# 仕様: spec_main.md Section 6.2 の「params 仕様」表を参照。
 mlflow:
   tracking_uri: 'mlruns'        # MLflowトラッキングサーバーのURI（ローカル or リモート）
   experiment_name: '01_BSDF_Raw_Data'

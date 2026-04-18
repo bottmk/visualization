@@ -122,6 +122,20 @@ MLflow の当該 run に以下が自動保存される。
     （例: `bsdf_2d_fft_525_20_r.png` — 525nm, 20°, BRDF）
 - `plots/bsdf_report.html`（多条件時は Panel Tabs で条件別、実測データは黒点 Scatter オーバーレイ）
 
+**run に記録される params**（config から自動構築、MLflow UI の Parameters 欄に表示）:
+
+| カテゴリ | key | 値の例 |
+|---|---|---|
+| 形状識別（排他） | `surface_design` | `RandomRough` / `SphericalArray` |
+|  | `surface_measured` | `Measured` / `Vk6` |
+| BSDF 測定 | `bsdf_measured` | `LightTools` |
+| ファイルパス | `shape_data_path` / `bsdf_data_path` | （該当時のみ） |
+| 形状パラメータ | RandomRough: `rq_um` / `lc_um` / `fractal_dim`、SphericalArray: `radius_um` / `pitch_um` / `placement` 等、Measured 系: `padding` / `pixel_size_um` / ... | モデルに応じた必要 key のみ |
+| sim 条件（実測と共通語彙）| `wavelength_um` / `theta_i_deg` / `phi_i_deg` / `mode` / `polarization` / `n1` / `n2` | 単条件はスカラ、多条件は JSON 文字列 |
+| sim 専用 | `fft_mode` / `apply_fresnel` | `tilt` / `False` |
+
+MLflow UI の Compare 画面で **sim と実測 BSDF が同じ key 名（`wavelength_um` 等）を使う**ため、縦並びで条件を直接比較できる。詳細は `spec_main.md` Section 6.2。
+
 ---
 
 ### `bsdf optimize` — Optuna による自動最適化
