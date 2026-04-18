@@ -118,8 +118,8 @@ MLflow の当該 run に以下が自動保存される。
 - `plots/surface.png` / `plots/surface.html`
 - `plots/bsdf_2d_<method>[条件サフィックス].png`
   - `<method>` は小文字で `fft` / `psd` / `ml`（`ml` は `adding_doubling.enabled: true` 時の多層合成結果）
-  - 条件サフィックスは多条件時のみ付与: `_wl<nm>nm_aoi<deg>_<brdf|btdf>`
-    （例: `bsdf_2d_fft_wl525nm_aoi20_brdf.png`）
+  - 条件サフィックスは多条件時のみ付与: `_<nm>_<deg>_<t|r>`
+    （例: `bsdf_2d_fft_525_20_r.png` — 525nm, 20°, BRDF）
 - `plots/bsdf_report.html`（多条件時は Panel Tabs で条件別、実測データは黒点 Scatter オーバーレイ）
 
 ---
@@ -238,11 +238,11 @@ bsdf runs list [オプション]
 ```
 
 ```bash
-# haze_fft 昇順で上位 10 件
-bsdf runs list --sort-by haze_fft --limit 10
+# haze_fft_0_t 昇順で上位 10 件
+bsdf runs list --sort-by haze_fft_0_t --limit 10
 
 # 表示メトリクスをカスタム指定
-bsdf runs list -s sparkle_fft -m haze_fft,sparkle_fft --descending
+bsdf runs list -s sparkle_fft_555_0_t -m haze_fft_0_t,sparkle_fft_555_0_t --descending
 ```
 
 ---
@@ -270,7 +270,7 @@ bsdf visualize --run-id abc123ef01234567890abcdef01234567 --output bsdf_plot.htm
 
 # ショートカット: 最新 / 最良 / プレフィックス
 bsdf visualize --run-id latest --log-to-mlflow
-bsdf visualize --run-id best:haze_fft --log-to-mlflow
+bsdf visualize --run-id best:haze_fft_0_t --log-to-mlflow
 bsdf visualize --run-id abc123ef --log-to-mlflow   # 8 文字以上
 ```
 
@@ -411,9 +411,21 @@ metrics:
     half_angle_deg: 2.5         # ヘイズ境界角（2.5°以上を散乱光として扱う）
   gloss:
     enabled: true
-    angle_deg: 60.0             # グロス測定角
-  doi:
-    enabled: true               # 写像性（0〜1）
+    enabled_angles: [20, 60, 85]   # 規格 3 角（ISO 2813）
+    black_glass_normalization: false  # true で黒ガラス基準化 → 0〜100 GU
+  # DOI (写像性) は 3 方式を並列で提供:
+  #   doi_nser : スペキュラー近傍エネルギー比 (独自・規格非準拠)
+  #   doi_comb : JIS K 7374 光学くし方式 (通称「くしば方式」)
+  #   doi_astm : ASTM E430 Dorigon 方式 (20°/30°反射率差分比)
+  # 値域は全て 0〜1。規格値 [%] が必要なら ×100 する。
+  doi_nser:
+    enabled: true               # θ_i=0, BTDF → doi_nser_fft_0_t
+  doi_comb:
+    enabled: true
+    enabled_modes: [t, r]       # BTDF/BRDF → doi_comb_fft_0_t / doi_comb_fft_0_r
+  doi_astm:
+    enabled: true
+    enabled_angles: [20, 30]    # → doi_astm_fft_20_r / doi_astm_fft_30_r
   sparkle:
     enabled: true
     viewing:
@@ -444,7 +456,7 @@ metrics:
 | Ssk | スキューネス（> 0: 突起多、< 0: くぼみ多） | 無次元 |
 | Sku | クルトシス（= 3: ガウス、> 3: 急峻） | 無次元 |
 | Sdq | 二乗平均平方根傾斜 | rad |
-| Sdr | 界面展開面積比 | % |
+| Sdr | 界面展開面積比 | 比率（0〜1、規格値 [%] は ×100） |
 | Sal | 自己相関長 | μm |
 | Str | テクスチャアスペクト比（0: 異方性、1: 等方性） | 無次元 |
 

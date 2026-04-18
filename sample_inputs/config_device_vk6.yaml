@@ -80,7 +80,7 @@ error_metrics:
 
 metrics:
   # Haze/Gloss/DOI は規格準拠のため代表波長 1 つでのみ計算される。
-  # 多波長 simulation でも haze_fft / gloss_fft / doi_fft の列は 1 つ固定。
+  # 多波長 simulation でも haze_fft / gloss_fft / doi_{nser,comb,astm}_fft の列は 1 つ固定。
   representative_wavelength_um: 0.555   # V(λ) ピーク付近
 
   haze:
@@ -89,7 +89,11 @@ metrics:
   gloss:
     enabled: true
     specular_half_angle_deg: 2.5
-  doi:
+  doi_nser:
+    enabled: false
+  doi_comb:
+    enabled: false
+  doi_astm:
     enabled: false
   sparkle:
     enabled: false

@@ -85,7 +85,11 @@ metrics:
   gloss:
     enabled: true
     specular_half_angle_deg: 2.5
-  doi:
+  doi_nser:
+    enabled: false
+  doi_comb:
+    enabled: false
+  doi_astm:
     enabled: false
   sparkle:
     enabled: false

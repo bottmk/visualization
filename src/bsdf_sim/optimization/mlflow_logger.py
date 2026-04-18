@@ -48,7 +48,7 @@ class RawDataLogger:
 
         Args:
             params: 形状パラメータ辞書
-            metrics: 評価指標辞書（haze_fft, gloss_psd 等）
+            metrics: 評価指標辞書（haze_fft_0_t, gloss_psd_60_r 等）
             df: BSDF データ DataFrame（Parquet として保存）
             run_name: Run の名前（省略時は自動生成）
             plot_paths: artifacts/plots/ に保存する画像パスのリスト（省略可）
@@ -172,7 +172,7 @@ def list_runs(
     Args:
         tracking_uri: MLflow トラッキング URI
         experiment_name: 実験名（デフォルト: 01_BSDF_Raw_Data）
-        sort_by: 並び順の基準メトリクス名（例: 'haze_fft'）。None → 開始時刻降順
+        sort_by: 並び順の基準メトリクス名（例: 'haze_fft_0_t'）。None → 開始時刻降順
         ascending: sort_by 指定時に昇順にするか（最小値が先）
         limit: 最大件数
 

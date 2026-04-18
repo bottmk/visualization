@@ -11,7 +11,9 @@ import numpy as np
 
 from .optical import (
     compute_all_optical_metrics,
-    compute_doi,
+    compute_doi_astm,
+    compute_doi_comb,
+    compute_doi_nser,
     compute_gloss,
     compute_haze,
     compute_log_rmse,
@@ -25,7 +27,9 @@ logger = logging.getLogger(__name__)
 _METRIC_REGISTRY: dict[str, Callable] = {
     "haze":     compute_haze,
     "gloss":    compute_gloss,
-    "doi":      compute_doi,
+    "doi_nser": compute_doi_nser,
+    "doi_comb": compute_doi_comb,
+    "doi_astm": compute_doi_astm,
     "sparkle":  compute_sparkle,
     "log_rmse": compute_log_rmse,
     "rq":       compute_rq,
@@ -75,7 +79,9 @@ def get_metric_names() -> list[str]:
 __all__ = [
     "compute_haze",
     "compute_gloss",
-    "compute_doi",
+    "compute_doi_nser",
+    "compute_doi_comb",
+    "compute_doi_astm",
     "compute_sparkle",
     "compute_log_rmse",
     "compute_all_optical_metrics",

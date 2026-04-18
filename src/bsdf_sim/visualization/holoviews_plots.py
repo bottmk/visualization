@@ -676,14 +676,19 @@ def plot_bsdf_report(
     if metrics:
         rows = []
         for k in sorted(metrics.keys()):
-            suffix = next(
-                (s for s in ("_fft", "_psd", "_ml") if k.endswith(s)), None
+            # 新命名規則 <name>_<method>_<deg>_<mode>: method は中央にある
+            method_token = next(
+                (s for s in ("_fft_", "_psd_", "_ml_") if s in k),
+                next(
+                    (s for s in ("_fft", "_psd", "_ml") if k.endswith(s)),
+                    None,
+                ),
             )
-            if suffix:
-                category = f"Optical ({suffix[1:].upper()})"
-                metric_name = k[: -len(suffix)]
-            elif k.startswith("log_rmse"):
+            if k.startswith("log_rmse"):
                 category = "Comparison"
+                metric_name = k
+            elif method_token:
+                category = f"Optical ({method_token.strip('_').upper()})"
                 metric_name = k
             else:
                 category = "Surface"

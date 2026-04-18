@@ -102,8 +102,14 @@ metrics:
     half_angle_deg: 2.5
   gloss:
     enabled: true
-    angle_deg: 60.0
-  doi:
+    enabled_angles: [20, 60, 85]
+  doi_nser:
     enabled: true
+  doi_comb:
+    enabled: true
+    enabled_modes: [t, r]
+  doi_astm:
+    enabled: true
+    enabled_angles: [20, 30]
   sparkle:
     enabled: false            # Sparkle は計算時間がかかるためデモではオフ

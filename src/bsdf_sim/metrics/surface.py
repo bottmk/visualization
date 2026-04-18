@@ -130,12 +130,16 @@ def compute_sdq(hm: HeightMap) -> float:
 
 
 def compute_sdr(hm: HeightMap) -> float:
-    """界面展開面積比 Sdr [%]（ISO 25178-2）。
+    """界面展開面積比 Sdr（ISO 25178-2）。
 
-    Sdr = (実面積 - 投影面積) / 投影面積 × 100
+    Sdr = (実面積 - 投影面積) / 投影面積
 
     実面積 = Σ sqrt(1 + (∂z/∂x)² + (∂z/∂y)²) · Δx · Δy
     投影面積 = (N · Δx)²
+
+    Returns:
+        Sdr 値（0 以上の比率）。ISO 25178-2 規格値（0〜100 [%]）が必要な場合は
+        呼び出し側で ×100 する。
     """
     dx = hm.pixel_size_um
     z = hm.data.astype(np.float64)
@@ -143,7 +147,7 @@ def compute_sdr(hm: HeightMap) -> float:
     dzdy = np.gradient(z, dx, axis=1)
     actual_area = np.sum(np.sqrt(1.0 + dzdx**2 + dzdy**2)) * dx**2
     projected_area = (hm.grid_size * dx) ** 2
-    return float((actual_area - projected_area) / projected_area * 100.0)
+    return float((actual_area - projected_area) / projected_area)
 
 
 def compute_sal(hm: HeightMap, acf_threshold: float = 0.2) -> float:
@@ -446,7 +450,7 @@ def compute_all_surface_metrics(
         ("ssk",     compute_ssk),
         ("sku",     compute_sku),
         ("sdq_rad", compute_sdq),
-        ("sdr_pct", compute_sdr),
+        ("sdr",     compute_sdr),
         ("sal_um",  compute_sal),
         ("str",     compute_str),
         # ── JIS B 0601 / ISO 4287 R-パラメータ ───────────────────────────────

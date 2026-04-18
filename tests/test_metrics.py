@@ -11,7 +11,10 @@ from bsdf_sim.metrics.surface import (
     compute_rp, compute_rv, compute_rsk, compute_rku, compute_rsm, compute_rc,
     compute_all_surface_metrics,
 )
-from bsdf_sim.metrics.optical import compute_log_rmse, compute_haze, compute_gloss, compute_doi
+from bsdf_sim.metrics.optical import (
+    compute_log_rmse, compute_haze, compute_gloss,
+    compute_doi_nser, compute_doi_comb, compute_doi_astm,
+)
 
 
 @pytest.fixture
@@ -43,6 +46,23 @@ def bsdf_grid():
     uv_r2 = u**2 + v**2
     bsdf = np.exp(-uv_r2 / 0.0001) * 1e4
     bsdf[uv_r2 > 1.0] = 0.0
+    return u, v, bsdf.astype(np.float32)
+
+
+@pytest.fixture
+def bsdf_grid_fine():
+    """細グリッド版 BSDF（N=513, du ≈ 0.22°）。
+
+    COMB 方式 (くし周期 ~0.05°) や ASTM 方式 (絞り 0.05°, offset 0.3°) が
+    角度的に解像可能な密度。u 範囲は ±0.1 に制限してスペキュラー近傍のみ。
+    """
+    N = 513
+    u_axis = np.linspace(-0.1, 0.1, N)
+    v_axis = np.linspace(-0.1, 0.1, N)
+    u, v = np.meshgrid(u_axis, v_axis, indexing="ij")
+    uv_r2 = u**2 + v**2
+    # σ² = 1e-6 → σ ≈ 1e-3 = 0.057° FWHM (狭幅ピーク)
+    bsdf = np.exp(-uv_r2 / 1e-6) * 1e6
     return u, v, bsdf.astype(np.float32)
 
 
@@ -83,7 +103,7 @@ class TestSurfaceMetrics:
         expected_keys = {
             # ISO 25178-2 S-パラメータ
             "sq_um", "sa_um", "sp_um", "sv_um", "sz_um",
-            "ssk", "sku", "sdq_rad", "sdr_pct", "sal_um", "str",
+            "ssk", "sku", "sdq_rad", "sdr", "sal_um", "str",
             # JIS B 0601 R-パラメータ
             "rq_um", "ra_um", "rz_um", "rp_um", "rv_um",
             "rsk", "rku", "rsm_um", "rc_um",
@@ -135,11 +155,11 @@ class TestISO25178Metrics:
         assert sku == pytest.approx(1.5, rel=0.05)
 
     def test_sdr_flat(self, flat_height_map):
-        """平坦面の Sdr = 0%。"""
+        """平坦面の Sdr = 0。"""
         assert compute_sdr(flat_height_map) == pytest.approx(0.0, abs=1e-6)
 
     def test_sdr_positive(self, sine_height_map):
-        """起伏のある面の Sdr > 0%。"""
+        """起伏のある面の Sdr > 0。"""
         assert compute_sdr(sine_height_map) > 0.0
 
     def test_sal_positive(self, sine_height_map):
@@ -233,16 +253,74 @@ class TestOpticalMetrics:
 
     def test_gloss_positive(self, bsdf_grid):
         u, v, bsdf = bsdf_grid
-        gloss = compute_gloss(u, v, bsdf, gloss_angle_deg=0.0, acceptance_deg=5.0)
+        # 0° 入射の場合、u_center=0 に戻して計算（法線方向）
+        gloss = compute_gloss(u, v, bsdf, gloss_angle_deg=0.0, u_center=0.0)
         assert gloss >= 0.0
 
-    def test_doi_range(self, bsdf_grid):
+    def test_gloss_black_glass_normalization(self, bsdf_grid):
+        """黒ガラス基準化を有効にすると値が GU (0〜100 近辺) になる。"""
         u, v, bsdf = bsdf_grid
-        doi = compute_doi(u, v, bsdf)
+        gu = compute_gloss(
+            u, v, bsdf, gloss_angle_deg=0.0, u_center=0.0,
+            black_glass_normalization=True,
+        )
+        assert gu >= 0.0
+
+    # ── DOI 方式 A: NSER (Near-Specular Energy Ratio) ──────────────────
+    def test_doi_nser_range(self, bsdf_grid):
+        u, v, bsdf = bsdf_grid
+        doi = compute_doi_nser(u, v, bsdf)
         assert 0.0 <= doi <= 1.0
 
-    def test_doi_narrow_beam(self, bsdf_grid):
-        """法線方向に集中したビームは DOI が高い。"""
+    def test_doi_nser_narrow_beam(self, bsdf_grid):
+        """法線方向に集中したビームは NSER 方式 DOI が高い。"""
         u, v, bsdf = bsdf_grid
-        doi = compute_doi(u, v, bsdf)
+        doi = compute_doi_nser(u, v, bsdf)
         assert doi > 0.5
+
+    # ── DOI 方式 B: COMB (JIS K 7374 光学くし) ─────────────────────────
+    def test_doi_comb_range(self, bsdf_grid_fine):
+        u, v, bsdf = bsdf_grid_fine
+        doi = compute_doi_comb(u, v, bsdf)
+        assert 0.0 <= doi <= 1.0
+
+    def test_doi_comb_narrow_beam_high_contrast(self, bsdf_grid_fine):
+        """狭幅ピークは COMB 方式で高コントラストになる。"""
+        u, v, bsdf = bsdf_grid_fine
+        doi = compute_doi_comb(u, v, bsdf)
+        assert doi > 0.1
+
+    def test_doi_comb_uniform_low_contrast(self):
+        """一様な BSDF は COMB 方式で低コントラストになる。"""
+        N = 513
+        u_axis = np.linspace(-0.1, 0.1, N)
+        v_axis = np.linspace(-0.1, 0.1, N)
+        u, v = np.meshgrid(u_axis, v_axis, indexing="ij")
+        bsdf = np.ones_like(u, dtype=np.float32)
+        doi = compute_doi_comb(u, v, bsdf)
+        # 一様分布はくし走査しても振幅が出ない（コントラスト ≈ 0）
+        assert doi < 0.05
+
+    # ── DOI 方式 C: ASTM E430 Dorigon ──────────────────────────────────
+    def test_doi_astm_range(self, bsdf_grid_fine):
+        u, v, bsdf = bsdf_grid_fine
+        doi = compute_doi_astm(u, v, bsdf)
+        assert 0.0 <= doi <= 1.0
+
+    def test_doi_astm_narrow_beam(self, bsdf_grid_fine):
+        """狭幅ピークは R(0°)>>R(0.3°) となり ASTM DOI が高い。"""
+        u, v, bsdf = bsdf_grid_fine
+        doi = compute_doi_astm(u, v, bsdf)
+        assert doi > 0.9
+
+    def test_doi_astm_wide_beam_low(self):
+        """広幅散乱は R(0°)≈R(0.3°) で ASTM DOI が低い。"""
+        N = 513
+        u_axis = np.linspace(-0.1, 0.1, N)
+        v_axis = np.linspace(-0.1, 0.1, N)
+        u, v = np.meshgrid(u_axis, v_axis, indexing="ij")
+        # 広幅ガウシアン（σ² = 0.1 → σ ≈ 0.32 > 0.3° offset）
+        bsdf = np.exp(-(u**2 + v**2) / 0.1) * 10.0
+        doi = compute_doi_astm(u, v, bsdf.astype(np.float32))
+        # 広幅では 0.3° オフセットの差がほぼ出ず DOI は 0.1 未満
+        assert doi < 0.1

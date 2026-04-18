@@ -78,21 +78,55 @@ error_metrics:
 
 # ── 評価指標 ──────────────────────────────────────────────────────────────────
 metrics:
-  # Haze/Gloss/DOI は規格（JIS K 7136 / ISO 2813 / ASTM D5767 等）が CIE 白色光源 +
-  # V(λ) 明所視応答で規定されているため、本実装は代表波長 1 つでの単波長近似を採用。
-  # `simulation.wavelength_um` を list で指定しても、これら 3 指標は代表波長でのみ
-  # 計算され、結果は haze_fft / gloss_fft / doi_fft（波長サフィックス無し）として記録される。
-  # Sparkle と Log-RMSE は波長ごとに独立計算される。詳細は spec_main.md 5.3 節参照。
+  # Haze/Gloss/DOI は規格（JIS K 7136 / ISO 2813 / JIS K 7374 / ASTM E430 等）が
+  # CIE 白色光源 + V(λ) 明所視応答で規定されているため、本実装は代表波長 1 つでの
+  # 単波長近似を採用。各指標の「規格 θ_i, mode」に対応する BSDF は自動追加 sim で
+  # 計算される。メトリクス命名は <name>_<method>_<deg>_<mode>（波長依存メトリクス
+  # は <name>_<method>_<nm>_<deg>_<mode>）。詳細は spec_main.md 5.3/5.4 節参照。
   representative_wavelength_um: 0.555   # 省略時のデフォルト（V(λ) ピーク付近）
+
+  # 斜入射対応値（sim の (θ_i, mode) で各指標を評価、規格値と別メトリクスとして出力）
+  compute_at_sim_angles: false  # 規格外条件での計算をオン/オフ
 
   haze:
     enabled: true
-    half_angle_deg: 2.5         # ヘイズ境界角 [deg]
+    half_angle_deg: 2.5         # ヘイズ境界角 [deg]（規格 2.5°）
+    # 規格条件: θ_i=0°, BTDF → メトリクス: haze_fft_0_t
+
   gloss:
     enabled: true
-    angle_deg: 60.0             # グロス測定角 [deg]
-  doi:
+    enabled_angles: [20, 60, 85]          # 規格 3 角 (ISO 2813 / ASTM D523)
+    black_glass_normalization: false      # true: 黒ガラス (n=1.567) 基準で 0〜100 GU
+    black_glass_n: 1.567                  # 黒ガラス屈折率（規格値固定推奨）
+    # 規格条件: θ_i=(20|60|85), BRDF → メトリクス: gloss_fft_<deg>_r
+
+  # DOI (写像性) は 3 方式を並列で提供。どれを使うかは用途で選択:
+  #   doi_nser : スペキュラー近傍エネルギー比 (独自・規格非準拠、最適化向き)
+  #   doi_comb : JIS K 7374 光学くし方式 (通称「くしば方式」、人間視覚との相関が高い)
+  #   doi_astm : ASTM E430 Dorigon 方式 (0°/0.3° 反射率差分比)
+  # 値域は 3 方式とも 0〜1 で統一。規格値 [%] が必要なら呼び出し側で ×100。
+
+  doi_nser:
     enabled: true
+    direct_half_angle_deg: 0.1  # 直進光コーン半角 [deg]
+    halo_half_angle_deg: 2.0    # ハロー領域半角 [deg]
+    # 規格条件: θ_i=0°, BTDF → メトリクス: doi_nser_fft_0_t
+
+  doi_comb:
+    enabled: true
+    enabled_modes: [t, r]       # 計算する mode（t=BTDF, r=BRDF）
+    comb_widths_mm: [0.125, 0.25, 0.5, 1.0, 2.0]  # JIS K 7374 標準くし幅
+    distance_mm: 280.0          # 試料〜くし距離 [mm] (Suga ICM 標準)
+    scan_half_angle_deg: 4.0    # 走査評価範囲の半角 [deg]
+    v_band_half_deg: 0.2        # 1D プロファイル抽出時の v 軸バンド半角 [deg]
+    # 規格条件: θ_i=0°, 各 mode → メトリクス: doi_comb_fft_0_t / doi_comb_fft_0_r
+
+  doi_astm:
+    enabled: true
+    enabled_angles: [20, 30]    # ASTM E430 標準 (塗装: 20°, 高光沢: 30°)
+    offset_deg: 0.3             # ASTM E430 標準オフセット [deg]
+    aperture_half_deg: 0.05     # 受光絞りの半角 [deg]
+    # 規格条件: θ_i=(20|30), BRDF → メトリクス: doi_astm_fft_<deg>_r
   sparkle:
     enabled: true
     viewing:
@@ -104,7 +138,7 @@ metrics:
       pixel_pitch_mm: null      # null のときはプリセット値（0.062mm）
       subpixel_layout: null     # null のときはプリセット値（'rgb_stripe'）
     # 多波長は simulation.wavelength_um を list で指定する（波長ごとに独立計算）。
-    # 各条件の Sparkle は sparkle_fft_wl525nm_aoi0_brdf のようにサフィックス付きで記録される。
+    # 各条件の Sparkle は sparkle_fft_<nm>_<deg>_<mode> 形式で記録される。
 
 # ── Optuna 最適化 ─────────────────────────────────────────────────────────────
 optuna:
@@ -112,17 +146,21 @@ optuna:
   n_jobs: 1                     # 並列試行数（>1 で並列実行）
   sampler: 'MOTPE'              # 'MOTPE'（多目的）/ 'TPE'（単目的）
   objectives:
-    - metric: 'haze_fft'        # 最小化目標1: FFT法ヘイズ
+    - metric: 'haze_fft_0_t'           # 最小化目標1: FFT法ヘイズ (θ_i=0, BTDF)
       direction: 'minimize'
-    - metric: 'sparkle_fft'     # 最小化目標2: FFT法ギラツキ
+    - metric: 'sparkle_fft_555_0_t'    # 最小化目標2: FFT法ギラツキ (555nm, θ_i=0, BTDF)
       direction: 'minimize'
     # PSD法の指標を使う例（指定するとPSD計算が自動で追加される）:
-    # - metric: 'haze_psd'
+    # - metric: 'haze_psd_0_t'
     #   direction: 'minimize'
-    # 光学指標の例:
-    # - metric: 'gloss_fft'
+    # 光学指標の例（新命名: <name>_<method>_<deg>_<mode>）:
+    # - metric: 'gloss_fft_60_r'      # 60° 光沢
     #   direction: 'maximize'
-    # - metric: 'doi_fft'
+    # - metric: 'doi_nser_fft_0_t'    # NSER (独自)
+    #   direction: 'maximize'
+    # - metric: 'doi_comb_fft_0_t'    # くしば (JIS K 7374) 透過
+    #   direction: 'maximize'
+    # - metric: 'doi_astm_fft_20_r'   # ASTM E430 Dorigon 20°
     #   direction: 'maximize'
     # 表面形状指標の例（BSDFと独立して追加可能）:
     # - metric: 'sq_um'
