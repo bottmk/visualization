@@ -19,6 +19,10 @@ warnings.filterwarnings("ignore")
 from bsdf_sim.visualization.constants import BSDF_LOG_FLOOR_DEFAULT
 from bsdf_sim.visualization.dynamicmap import create_dashboard_from_config
 from bsdf_sim.visualization.profile_extract import slice_phi0
+from bsdf_sim.visualization.secondary_axis import (
+    DEFAULT_SECONDARY_X_UNIT,
+    add_secondary_xaxis_mpl,
+)
 
 CFG = Path(__file__).parent.parent / "sample_inputs" / "config_comp_meas_bsdf.yaml"
 OUT = Path(__file__).parent / "dashboard_demo_overlay.png"
@@ -28,7 +32,14 @@ OUT = Path(__file__).parent / "dashboard_demo_overlay.png"
 #   XSCALE: "linear" or "log"（散乱角 θ_s）。本デモは θ_s ≥ 0 なので log も可。
 #     log 時は θ_s > 0.05° に制限。
 YSCALE = "log"
-XSCALE = "linear"
+XSCALE = "log"    # Λ の副軸は primary X が log の時に正しく表示される
+                  # （linear primary では θ_s=0 近傍で Λ→∞ となり軸が圧縮される）
+
+# ── 副軸（上段 X 軸）のユニット ───────────────────────────────────────────
+#   "lambda_scale" / "u" / "f" / "k_x" / "theta_s"（最後は副軸無し）
+#   詳細は src/bsdf_sim/visualization/secondary_axis.py 参照。
+SECONDARY_X_UNIT = DEFAULT_SECONDARY_X_UNIT  # 既定は "lambda_scale"（構造スケール Λ [μm]）
+WAVELENGTH_UM_FOR_AXIS = 0.465  # config_comp_meas_bsdf.yaml の先頭波長に合わせる
 
 
 def main() -> None:
@@ -69,6 +80,10 @@ def main() -> None:
         ax.set_xlim(0, 90)
         ax.set_xticks(range(0, 91, 10))
         ax.set_xticks(range(0, 91, 5), minor=True)
+
+    # 上段副軸（デフォルト: 構造スケール Λ [μm]）
+    if SECONDARY_X_UNIT and SECONDARY_X_UNIT != "theta_s":
+        add_secondary_xaxis_mpl(ax, SECONDARY_X_UNIT, WAVELENGTH_UM_FOR_AXIS)
     ax.set_xlabel("Scattering angle theta_s [deg]")
     ax.set_ylabel("BSDF [1/sr]")
     ax.set_title(

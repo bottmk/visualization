@@ -46,6 +46,11 @@ from .constants import (
     MEASURED_PHI_S_TOL_DEG,
 )
 from .profile_extract import slice_phi0, sort_and_floor
+from .secondary_axis import (
+    AXIS_UNITS,
+    DEFAULT_SECONDARY_X_UNIT,
+    make_secondary_xaxis_hook,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +102,8 @@ def _make_1d_overlay(
     measured_profile: tuple[np.ndarray, np.ndarray] | None = None,
     ylim: tuple[float, float] | None = None,
     xscale: str = "linear",
+    secondary_x_unit: str | None = None,
+    wavelength_um: float | None = None,
 ) -> Any:
     """UV グリッドから phi=0° プロファイルを抽出し、実測と重ね描きする。
 
@@ -104,6 +111,9 @@ def _make_1d_overlay(
         scale: Y軸スケール "linear" or "log"（BSDF）
         xscale: X軸スケール "linear" or "log"（散乱角）
         ylim: Y軸範囲 (ymin, ymax)。None の場合は自動スケール。
+        secondary_x_unit: 副軸（上段 X）のユニット。None で非表示。
+            'lambda_scale'（既定）/ 'u' / 'f' / 'k_x' / 'theta_s' のいずれか。
+        wavelength_um: 波長 [μm]。副軸の数値変換に必要。None 時は副軸を作らない。
     """
     # sim: phi≈0 スライス（u 軸方向）。BUG-009 対策は profile_extract.slice_phi0
     # に集約済み（fftfreq 順序・u 正半分のみ・argsort・floor の一貫処理）。
@@ -157,9 +167,18 @@ def _make_1d_overlay(
     if xscale == "log":
         # log スケールでは固定 ticker を使わず、bokeh の LogTicker に任せる
         overlay_opts["xlim"] = (0.1, 90)
+        hooks: list[Any] = []
     else:
         overlay_opts["xlim"] = (0, 90)
-        overlay_opts["hooks"] = [_xticks_hook]
+        hooks = [_xticks_hook]
+
+    # 副軸（上段 X 軸）の追加 — デフォルトは構造スケール Λ [μm]
+    if secondary_x_unit and wavelength_um is not None and secondary_x_unit != "theta_s":
+        hooks.append(make_secondary_xaxis_hook(secondary_x_unit, wavelength_um))
+
+    if hooks:
+        overlay_opts["hooks"] = hooks
+
     if ylim is not None:
         overlay_opts["ylim"] = ylim
     overlay = hv.Overlay(elements).opts(**overlay_opts)
@@ -299,7 +318,7 @@ class _BaseBSDFDashboard(ABC):
         return fix_ylim, ymin_input, ymax_input
 
     def _make_axis_controls(self) -> dict[str, Any]:
-        """Y log/linear + X log/linear + Y 範囲固定 UI を一括生成する。
+        """Y log/linear + X log/linear + Y 範囲固定 + 副軸ユニット UI を一括生成する。
 
         3 ダッシュボード（RandomRough / Spherical / Measured）で同じ UI を
         繰り返し定義していた重複を集約したヘルパー。
@@ -307,7 +326,8 @@ class _BaseBSDFDashboard(ABC):
         Returns:
             {"yscale": RadioButtonGroup(Y軸スケール),
              "xscale": RadioButtonGroup(X軸スケール),
-             "fix_ylim": Checkbox, "ymin": FloatInput, "ymax": FloatInput}
+             "fix_ylim": Checkbox, "ymin": FloatInput, "ymax": FloatInput,
+             "secondary_x": Select(副軸ユニット)}
         """
         yscale = pn.widgets.RadioButtonGroup(
             name="Y軸（BSDF）スケール", options=["linear", "log"], value="log",
@@ -316,12 +336,24 @@ class _BaseBSDFDashboard(ABC):
             name="X軸（角度）スケール", options=["linear", "log"], value="linear",
         )
         fix_ylim, ymin, ymax = self._make_ylim_controls()
+        secondary_x = pn.widgets.Select(
+            name="上段副軸",
+            options={
+                "Λ（構造スケール [μm]）": "lambda_scale",
+                "u（方向余弦）": "u",
+                "f（空間周波数 [μm⁻¹]）": "f",
+                "k_x（波数 [rad/μm]）": "k_x",
+                "（表示なし）": "theta_s",
+            },
+            value=DEFAULT_SECONDARY_X_UNIT,
+        )
         return {
             "yscale": yscale,
             "xscale": xscale,
             "fix_ylim": fix_ylim,
             "ymin": ymin,
             "ymax": ymax,
+            "secondary_x": secondary_x,
         }
 
     def serve(
@@ -510,11 +542,13 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
             rq=rq_slider, lc=lc_slider, fractal=fractal_slider,
             scale=ctrls["yscale"], xscale=ctrls["xscale"],
             fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
+            sec_x=ctrls["secondary_x"],
         )
         def update_plot(
             rq: float, lc: float, fractal: float,
             scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
+            sec_x: str,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_preview(
@@ -527,6 +561,7 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
                 return _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
+                    secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
@@ -551,6 +586,7 @@ class RandomRoughDynamicMap(_BaseBSDFDashboard):
                     rq_slider, lc_slider, fractal_slider,
                     ctrls["yscale"], ctrls["xscale"],
                     ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
+                    ctrls["secondary_x"],
                     pn.pane.Markdown(update_metrics),
                     width=300,
                 ),
@@ -654,12 +690,14 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
             placement=placement_select, overlap=overlap_select,
             scale=ctrls["yscale"], xscale=ctrls["xscale"],
             fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
+            sec_x=ctrls["secondary_x"],
         )
         def update_plot(
             radius: float, pitch: float, base: float,
             placement: str, overlap: str,
             scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
+            sec_x: str,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_preview(
@@ -673,6 +711,7 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                 return _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
+                    secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
@@ -704,6 +743,7 @@ class SphericalArrayDynamicMap(_BaseBSDFDashboard):
                     placement_select, overlap_select,
                     ctrls["yscale"], ctrls["xscale"],
                     ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
+                    ctrls["secondary_x"],
                     pn.pane.Markdown(update_metrics),
                     width=320,
                 ),
@@ -739,10 +779,12 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
         @pn.depends(
             scale=ctrls["yscale"], xscale=ctrls["xscale"],
             fix=ctrls["fix_ylim"], ymin=ctrls["ymin"], ymax=ctrls["ymax"],
+            sec_x=ctrls["secondary_x"],
         )
         def update_plot(
             scale: str, xscale: str,
             fix: bool, ymin: float, ymax: float,
+            sec_x: str,
         ) -> Any:
             try:
                 u, v, bsdf = self._compute_bsdf_for_model(
@@ -755,6 +797,7 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
                 return _make_1d_overlay(
                     u, v, bsdf, scale, title,
                     measured_profile=meas_profile, ylim=ylim, xscale=xscale,
+                    secondary_x_unit=sec_x, wavelength_um=self.wavelength_um,
                 )
             except Exception as e:
                 logger.warning(f"BSDF 計算エラー: {e}")
@@ -781,6 +824,7 @@ class MeasuredSurfaceDynamicMap(_BaseBSDFDashboard):
                 pn.Column(
                     ctrls["yscale"], ctrls["xscale"],
                     ctrls["fix_ylim"], ctrls["ymin"], ctrls["ymax"],
+                    ctrls["secondary_x"],
                     pn.pane.Markdown(metrics_md),
                     width=320,
                 ),

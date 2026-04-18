@@ -21,6 +21,10 @@ from .constants import (
     MEASURED_PHI_S_TOL_DEG,
 )
 from .profile_extract import sort_and_floor
+from .secondary_axis import (
+    DEFAULT_SECONDARY_X_UNIT,
+    make_secondary_xaxis_hook,
+)
 
 try:
     import holoviews as hv
@@ -52,6 +56,7 @@ def plot_bsdf_1d_overlay(
     title: str = "BSDF 比較",
     show_haze_boundary: bool = False,
     haze_half_angle_deg: float = 2.5,
+    secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
 ) -> Any:
     """FFT/PSD/実測 BSDF の1次元オーバーレイプロットを生成する。
 
@@ -169,6 +174,16 @@ def plot_bsdf_1d_overlay(
     else:
         overlay_opts["xlim"] = (0, 90)
 
+    # 副軸（上段 X）— デフォルトは構造スケール Λ [μm]
+    if (
+        secondary_x_unit
+        and secondary_x_unit != "theta_s"
+        and wavelength_um is not None
+    ):
+        overlay_opts["hooks"] = [
+            make_secondary_xaxis_hook(secondary_x_unit, wavelength_um),
+        ]
+
     overlay = hv.Overlay(curves).opts(**overlay_opts)
     return overlay
 
@@ -252,17 +267,32 @@ def create_scale_toggle_panel(
         value="linear",
         button_type="default",
     )
+    sec_x_selector = pn.widgets.Select(
+        name="上段副軸",
+        options={
+            "Λ（構造スケール [μm]）": "lambda_scale",
+            "u（方向余弦）": "u",
+            "f（空間周波数 [μm⁻¹]）": "f",
+            "k_x（波数 [rad/μm]）": "k_x",
+            "（表示なし）": "theta_s",
+        },
+        value=DEFAULT_SECONDARY_X_UNIT,
+    )
 
-    @pn.depends(scale=scale_selector, xscale=xscale_selector)
-    def update_plot(scale: str, xscale: str) -> Any:
+    @pn.depends(
+        scale=scale_selector, xscale=xscale_selector, sec_x=sec_x_selector,
+    )
+    def update_plot(scale: str, xscale: str, sec_x: str) -> Any:
         return plot_bsdf_1d_overlay(
-            df, scale=scale, xscale=xscale, **plot_kwargs,
+            df, scale=scale, xscale=xscale, secondary_x_unit=sec_x,
+            **plot_kwargs,
         )
 
     return pn.Column(
         pn.Row(
             pn.pane.Markdown("**Y軸:**"), scale_selector,
             pn.pane.Markdown("**X軸:**"), xscale_selector,
+            pn.pane.Markdown("**副軸:**"), sec_x_selector,
         ),
         pn.panel(update_plot),
     )
@@ -594,6 +624,7 @@ def _build_condition_panel(
     mode: str,
     log_rmse_by_method: dict[str, float],
     xscale: str = "linear",
+    secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
 ) -> Any:
     """1 条件分の 1D オーバーレイ＋2D ヒートマップ Panel を生成する。"""
     _check_holoviews()
@@ -603,6 +634,7 @@ def _build_condition_panel(
     plot_1d = plot_bsdf_1d_overlay(
         df_cond, wavelength_um=wl_um, theta_i_deg=theta_i, mode=mode,
         scale=scale, xscale=xscale, title=title_1d,
+        secondary_x_unit=secondary_x_unit,
     )
 
     # 2D ヒートマップ（手法別）
@@ -643,6 +675,7 @@ def plot_bsdf_report(
     xscale: str = "linear",
     title: str = "BSDF Report",
     n_grid: int = 256,
+    secondary_x_unit: str | None = DEFAULT_SECONDARY_X_UNIT,
 ) -> Any:
     """1D プロファイル・2D ヒートマップ・指標テーブルをまとめた Panel レポートを生成する。
 
@@ -709,7 +742,7 @@ def plot_bsdf_report(
             rmse_dict = log_rmse_map.get((wl, theta_i, mode_v), {})
             cond_panel = _build_condition_panel(
                 df, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
-                xscale=xscale,
+                xscale=xscale, secondary_x_unit=secondary_x_unit,
             )
             components.append(cond_panel)
     else:
@@ -731,7 +764,7 @@ def plot_bsdf_report(
             )
             cond_panel = _build_condition_panel(
                 df_cond, scale, n_grid, wl, theta_i, mode_v, rmse_dict,
-                xscale=xscale,
+                xscale=xscale, secondary_x_unit=secondary_x_unit,
             )
             tabs.append((tab_name, cond_panel))
         components.append(pn.Tabs(*tabs, tabs_location="left"))
