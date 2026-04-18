@@ -261,3 +261,42 @@ class TestSparkleL5:
         )
         # 窓幅変更で値が変わるはず（完全一致はしない）
         assert abs(cs_3 - cs_5) > 1e-9
+
+    def test_pupil_integration_equals_dc_for_small_pupil(
+        self, large_height_map, sparkle_config_small_pixel
+    ):
+        """窓 FFT 分解能より pupil が小さい場合、pupil 積分は DC 1 点と一致する。
+        smartphone 3×20μm 窓で u_pupil=0.005 < du=0.008 となり 1 サンプルに退化。"""
+        cs_pup = compute_sparkle_l5(
+            large_height_map, "G", sparkle_config_small_pixel,
+            window_size_factor=3.0, pupil_integration=True,
+        )
+        cs_dc = compute_sparkle_l5(
+            large_height_map, "G", sparkle_config_small_pixel,
+            window_size_factor=3.0, pupil_integration=False,
+        )
+        # 小さい pupil では数値的にほぼ一致（自動 fallback が働く）
+        assert cs_pup == pytest.approx(cs_dc, rel=1e-6)
+
+    def test_pupil_integration_differs_for_large_window(self, large_height_map):
+        """窓幅を十分大きくして FFT 分解能を pupil より細かくすると、pupil 積分と
+        DC 1 点で値が異なることを確認する。"""
+        # p=100μm、d_p=3mm、D=300mm → u_pupil=0.005
+        # 窓 window_size_factor=5 → W=500μm → du=λ/W ≈ 0.001 → pupil 内に ~5x5 サンプル
+        cfg = {
+            "viewing": {"distance_mm": 300.0, "pupil_diameter_mm": 3.0},
+            "display": {"pixel_pitch_mm": 0.100, "subpixel_layout": "rgb_stripe"},
+        }
+        # large_height_map (N=512, dx=0.25μm) → 500μm 窓 = 2000 samples > N → 不可
+        # 代わりに dx=1μm でスケールアップ
+        hm = HeightMap(
+            data=large_height_map.data, pixel_size_um=1.0
+        )  # dx=1μm, 物理サイズ 512μm、pitch=100μm なら 5 画素
+        cs_pup = compute_sparkle_l5(
+            hm, "G", cfg, window_size_factor=3.0, pupil_integration=True
+        )
+        cs_dc = compute_sparkle_l5(
+            hm, "G", cfg, window_size_factor=3.0, pupil_integration=False
+        )
+        # pupil 積分と DC 1 点で異なる値になる
+        assert abs(cs_pup - cs_dc) > 1e-6

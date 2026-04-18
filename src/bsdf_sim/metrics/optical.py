@@ -531,11 +531,16 @@ def compute_sparkle(
     bsdf: np.ndarray,
     sparkle_config: dict,
 ) -> float:
-    """ギラツキコントラスト Cs = σ/μ を計算する。
+    """ギラツキコントラスト Cs = σ/μ を計算する（L1: 全面一様 + 単波長）。
 
     ディスプレイ画素ごとにBSDFを積分し、輝度のばらつき（σ/μ）を計算する。
     multi-wavelength な比較は simulate() 側の条件ループで波長ごとに独立に
     計算される（サフィックス `sparkle_fft_<nm>_<deg>_<mode>` 等で記録）。
+
+    ⚠️ **警告**: 角度ビニング方式を用いるため、返り値 Cs は SEMI D63 / IDMS
+    実測値より 100–10000× 大きい apparent 値（DC 集中が原因）。**相対比較・最適化
+    目的関数としては有用** だが、絶対値が必要な場合は `compute_sparkle_l5` を
+    使うこと。詳細は `docs/sparkle_calculation.md` Section 1.1 の警告ブロック参照。
 
     Args:
         u_grid: 方向余弦 u グリッド（2D）
@@ -545,7 +550,7 @@ def compute_sparkle(
             viewing と display のプリセットのみ参照。illumination は読まない）
 
     Returns:
-        ギラツキコントラスト Cs = σ/μ
+        ギラツキコントラスト Cs = σ/μ（apparent 値、相対比較用）
     """
     viewing = sparkle_config.get("viewing", {})
     display = sparkle_config.get("display", {})

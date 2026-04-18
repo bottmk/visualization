@@ -233,6 +233,11 @@ def compute_sparkle_l3prime(
 
     該当色のサブピクセル位置のみ発光、単一代表波長で評価。
 
+    ⚠️ **警告**: 本関数は角度ビニング方式を用いるため、返り値 Cs は SEMI D63 /
+    IDMS 実測値と比較して 100–2000× 大きい apparent 値である。**相対比較用途のみ**
+    で使用し、絶対値が必要な場合は `compute_sparkle_l5` を使うこと。詳細は
+    `docs/sparkle_calculation.md` Section 1.1 の警告ブロック参照。
+
     Args:
         height_map: AG フィルム高さマップ
         color: 点灯色 'R' / 'G' / 'B'
@@ -242,7 +247,7 @@ def compute_sparkle_l3prime(
         is_btdf: BTDF (True) / BRDF (False)
 
     Returns:
-        ギラツキコントラスト Cs
+        ギラツキコントラスト Cs（apparent 値、相対比較用）
     """
     if wavelength_um is None:
         wavelength_um = _COLOR_WAVELENGTHS_UM[color]
@@ -288,6 +293,10 @@ def compute_sparkle_l4(
 
     narrowband 近似: 各色は代表波長 1 点で評価する（S_c(λ) ≈ δ(λ-λ_c)）。分光幅を
     考慮した完全版は将来拡張とする（docs/sparkle_approximation_levels.md Section 6）。
+
+    ⚠️ **警告**: L3' と同じ角度ビニング方式のため、返り値 Cs は SEMI D63 / IDMS
+    実測値より 100–1500× 大きい apparent 値。**相対比較用途のみ** で使用し、絶対値
+    が必要な場合は `compute_sparkle_l5` を使うこと。
 
     Args:
         height_map: AG フィルム高さマップ
