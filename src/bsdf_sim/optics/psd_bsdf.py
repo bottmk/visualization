@@ -234,6 +234,16 @@ def compute_bsdf_psd(
     """PSD法（Rayleigh-Rice理論）でBSDFを計算する。
 
     BSDF(θ_i, θ_s) = (16π²/λ⁴) * cos(θ_i) * cos²(θ_s) * Q * PSD(f_x, f_y)
+        f_x = (sin θ_s cos φ_s - sin θ_i cos φ_i) / λ
+        f_y = (sin θ_s sin φ_s - sin θ_i sin φ_i) / λ
+
+    返却する `u_grid = sin θ_s cos φ_s`, `v_grid = sin θ_s sin φ_s` は
+    上式の f_x, f_y に sin θ_i cos/sin φ_i を加算して得る（FFT の output_shift
+    モードと同じ座標規約）。この結果 specular は (sin θ_i cos φ_i, sin θ_i sin φ_i)
+    に正しく配置される。
+
+    フル半球カバレッジには `dx ≤ λ / (2·(1 + sin θ_i))` が必要。これを超えると
+    後方散乱側の一部が FFT 格子（f_x ∈ [-1/(2dx), +1/(2dx)]）の外に出て欠損する。
 
     Args:
         height_map: 高さマップ
@@ -247,8 +257,8 @@ def compute_bsdf_psd(
         approx_mode: False=完全形（デフォルト）/ True=簡略形（高速）
 
     Returns:
-        u_grid: 方向余弦 u の2次元グリッド
-        v_grid: 方向余弦 v の2次元グリッド
+        u_grid: 方向余弦 u = sin(θ_s)*cos(φ_s) の2次元グリッド
+        v_grid: 方向余弦 v = sin(θ_s)*sin(φ_s) の2次元グリッド
         bsdf: BSDF値 [sr⁻¹] の2次元グリッド
     """
     # PSD 計算
@@ -257,15 +267,24 @@ def compute_bsdf_psd(
     N = height_map.grid_size
     dx = height_map.pixel_size_um
 
-    # 空間周波数 → 方向余弦 UV
-    u_grid = fx * wavelength_um
-    v_grid = fy * wavelength_um
+    # 空間周波数 → 方向余弦 UV（Rayleigh-Rice 標準定義）
+    # f_x = (sin θ_s cos φ_s - sin θ_i cos φ_i) / λ
+    # f_y = (sin θ_s sin φ_s - sin θ_i sin φ_i) / λ
+    # ⇔ u = sin θ_s cos φ_s = f_x · λ + sin θ_i cos φ_i
+    #   v = sin θ_s sin φ_s = f_y · λ + sin θ_i sin φ_i
+    # θ_i=0 ではオフセット 0、θ_i>0 では specular を (sin θ_i cos φ_i, sin θ_i sin φ_i)
+    # に正しく配置する。
+    theta_i_rad = np.deg2rad(theta_i_deg)
+    phi_i_rad = np.deg2rad(phi_i_deg)
+    u_spec = np.sin(theta_i_rad) * np.cos(phi_i_rad)
+    v_spec = np.sin(theta_i_rad) * np.sin(phi_i_rad)
+    u_grid = fx * wavelength_um + u_spec
+    v_grid = fy * wavelength_um + v_spec
     uv_r2 = u_grid**2 + v_grid**2
     valid_mask = uv_r2 <= 1.0
 
     # 散乱角グリッド
     theta_s_deg = np.where(valid_mask, np.rad2deg(np.arcsin(np.sqrt(np.minimum(uv_r2, 1.0)))), 0.0)
-    theta_i_rad = np.deg2rad(theta_i_deg)
     cos_i = np.cos(theta_i_rad)
     cos_s = np.where(valid_mask, np.sqrt(np.maximum(1.0 - uv_r2, 0.0)), 1.0)
 
