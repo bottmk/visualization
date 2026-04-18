@@ -724,13 +724,15 @@ def compute_all_optical_metrics(
     if not standards_only:
         sparkle_cfg = cfg.get("sparkle")
         if sparkle_cfg is not None and sparkle_cfg.get("enabled", True):
+            from .sparkle_calibrator import apply_calibration
+
             level = str(sparkle_cfg.get("level", "L1")).upper()
             color = sparkle_cfg.get("color", "G")
+            calibration_cfg = sparkle_cfg.get("calibration")
             # L1 は BSDF のみで計算、L3/L4/L5 は HeightMap が必要
             if level == "L1":
-                results[f"sparkle_l1{wl_suffix}"] = compute_sparkle(
-                    u_grid, v_grid, bsdf, sparkle_cfg
-                )
+                cs_raw = compute_sparkle(u_grid, v_grid, bsdf, sparkle_cfg)
+                results[f"sparkle_l1{wl_suffix}"] = apply_calibration(cs_raw, calibration_cfg)
             elif height_map is None:
                 raise ValueError(
                     f"sparkle.level={level!r} は height_map が必要です。"
@@ -739,22 +741,25 @@ def compute_all_optical_metrics(
             elif level == "L3":
                 from .sparkle_extended import compute_sparkle_l3
                 wl_um = wavelength_nm / 1000.0
-                results[f"sparkle_l3{wl_suffix}"] = compute_sparkle_l3(
+                cs_raw = compute_sparkle_l3(
                     height_map, color, sparkle_cfg, wavelength_um=wl_um,
                     n1=n1, n2=n2, is_btdf=is_btdf,
                 )
+                results[f"sparkle_l3{wl_suffix}"] = apply_calibration(cs_raw, calibration_cfg)
             elif level == "L4":
                 from .sparkle_extended import compute_sparkle_l4
-                results[f"sparkle_l4{wl_suffix}"] = compute_sparkle_l4(
+                cs_raw = compute_sparkle_l4(
                     height_map, sparkle_cfg, n1=n1, n2=n2, is_btdf=is_btdf,
                 )
+                results[f"sparkle_l4{wl_suffix}"] = apply_calibration(cs_raw, calibration_cfg)
             elif level == "L5":
                 from .sparkle_extended import compute_sparkle_l5
                 wl_um = wavelength_nm / 1000.0
-                results[f"sparkle_l5{wl_suffix}"] = compute_sparkle_l5(
+                cs_raw = compute_sparkle_l5(
                     height_map, color, sparkle_cfg, wavelength_um=wl_um,
                     n1=n1, n2=n2, is_btdf=is_btdf,
                 )
+                results[f"sparkle_l5{wl_suffix}"] = apply_calibration(cs_raw, calibration_cfg)
             else:
                 raise ValueError(
                     f"sparkle.level={level!r} は未知です。"

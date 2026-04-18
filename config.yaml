@@ -136,6 +136,12 @@ metrics:
                                 # L5: 空間分解 BSDF（窓付き FFT、要 color 指定、最も物理的）
                                 # 詳細: docs/sparkle_approximation_levels.md
     color: 'G'                  # L3/L5 用の点灯色 'R' / 'G' / 'B'（L1/L4 では無視）
+    # 実測校正（raw Cs が実測値と桁で乖離するため、スケール/多項式で補正可能）
+    calibration:
+      mode: null                # 'scale' / 'polynomial' / null (既定、校正なし)
+      # scale: 0.05             # mode='scale' 時: cs_cal = scale × cs_sim
+      # polynomial: [0.05, 1.0, 0.0]  # mode='polynomial' 時: cs_cal = a × cs_sim^b + c
+      # 校正係数の求め方: docs/sparkle_calibration.md 参照
     viewing:
       preset: 'smartphone'      # 'smartphone' / 'tablet' / 'monitor' / 'custom'
       distance_mm: null         # null のときはプリセット値（300mm）

@@ -19,6 +19,7 @@ from .optical import (
     compute_log_rmse,
     compute_sparkle,
 )
+from .sparkle_calibrator import apply_calibration, fit_polynomial, fit_scale
 from .sparkle_extended import (
     compute_sparkle_l3,
     compute_sparkle_l4,
@@ -91,6 +92,9 @@ __all__ = [
     "compute_sparkle_l3",
     "compute_sparkle_l4",
     "compute_sparkle_l5",
+    "apply_calibration",
+    "fit_scale",
+    "fit_polynomial",
     "compute_log_rmse",
     "compute_all_optical_metrics",
     "compute_rq",
