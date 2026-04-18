@@ -7,6 +7,12 @@ from .holoviews_plots import (
     plot_bsdf_2d_heatmap,
     save_html,
 )
+from .metric_overlays import (
+    overlay_all_metrics_2d,
+    overlay_doi_nser_2d,
+    overlay_gloss_2d,
+    overlay_haze_2d,
+)
 
 __all__ = [
     "plot_bsdf_1d_overlay",
@@ -14,4 +20,8 @@ __all__ = [
     "create_scale_toggle_panel",
     "save_html",
     "RandomRoughDynamicMap",
+    "overlay_haze_2d",
+    "overlay_gloss_2d",
+    "overlay_doi_nser_2d",
+    "overlay_all_metrics_2d",
 ]
